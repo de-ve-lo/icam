@@ -1,0 +1,51 @@
+{
+  "name": "installment-management-app",
+  "version": "1.0.0",
+  "description": "Desktop application for installment management software",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build-win": "electron-builder --win",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish=never"
+  },
+  "keywords": [
+    "installment",
+    "management",
+    "desktop",
+    "electron"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.6",
+    "chart.js": "^4.4.0",
+    "jspdf": "^2.5.1",
+    "html2canvas": "^1.4.1",
+    "moment": "^2.29.4"
+  },
+  "build": {
+    "appId": "com.installmentmanagement.app",
+    "productName": "Installment Management",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "database/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  }
+}

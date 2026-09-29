@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Installment Management System</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/components.css">
+    <link rel="stylesheet" href="styles/animations.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-calculator"></i>
+                    <h1>Installment Management System</h1>
+                </div>
+                    <div class="header-actions">
+                        <button id="calculator-btn" class="btn btn-primary" title="Open Installment Calculator">
+                            <i class="fas fa-calculator"></i>
+                            Calculator
+                        </button>
+                        <button id="backup-btn" class="btn btn-secondary" title="Backup Database">
+                            <i class="fas fa-download"></i>
+                            Backup
+                        </button>
+                        <button id="system-reset-btn" class="btn btn-danger" title="Reset Entire System" style="margin-left: 8px;">
+                            <i class="fas fa-trash-restore"></i>
+                            Reset System
+                        </button>
+                        <div class="user-info">
+                            <i class="fas fa-user"></i>
+                            <span>Admin</span>
+                        </div>
+                    </div>
+            </div>
+        </header>
+
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <ul class="nav-menu">
+                <li class="nav-item active">
+                    <a href="#dashboard" class="nav-link" data-section="dashboard">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#products" class="nav-link" data-section="products">
+                        <i class="fas fa-motorcycle"></i>
+                        <span>Products</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#suppliers" class="nav-link" data-section="suppliers">
+                        <i class="fas fa-truck"></i>
+                        <span>Suppliers</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#stock" class="nav-link" data-section="stock">
+                        <i class="fas fa-warehouse"></i>
+                        <span>Stock Management</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#customers" class="nav-link" data-section="customers">
+                        <i class="fas fa-users"></i>
+                        <span>Customers</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#installments" class="nav-link" data-section="installments">
+                        <i class="fas fa-credit-card"></i>
+                        <span>Installments</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#cash-sales" class="nav-link" data-section="cash-sales">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span>Cash Sales</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#supplier-payments" class="nav-link" data-section="supplier-payments">
+                        <i class="fas fa-money-bill"></i>
+                        <span>Supplier Payments</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#expenses" class="nav-link" data-section="expenses">
+                        <i class="fas fa-receipt"></i>
+                        <span>Expenses</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#dues-reminders" class="nav-link" data-section="dues-reminders">
+                        <i class="fas fa-bell"></i>
+                        <span>Dues & Reminders</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#reports" class="nav-link" data-section="reports">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Reports</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Section -->
+            <section id="dashboard-section" class="content-section active">
+                <div class="section-header">
+                    <h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2>
+                    <p>Overview of your installment management system</p>
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="dashboard-card">
+                        <div class="card-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="total-customers">0</h3>
+                            <p>Total Customers</p>
+                        </div>
+                    </div>
+                    
+                    <div class="dashboard-card">
+                        <div class="card-icon">
+                            <i class="fas fa-motorcycle"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="total-stock">0</h3>
+                            <p>Items in Stock</p>
+                        </div>
+                    </div>
+                    
+                    <div class="dashboard-card">
+                        <div class="card-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="pending-amount">Rs. 0</h3>
+                            <p>Pending Amount</p>
+                        </div>
+                    </div>
+                    
+                    <div class="dashboard-card">
+                        <div class="card-icon">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="card-content">
+                            <h3 id="overdue-installments">0</h3>
+                            <p>Overdue Installments</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-charts">
+                    <div class="chart-container">
+                        <canvas id="installment-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Products Section -->
+            <section id="products-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-motorcycle"></i> Products Management</h2>
+                    <button id="add-product-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Add New Product
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table id="products-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Item Name</th>
+                                <th>Current Price</th>
+                                <th>Purchase Price</th>
+                                <th>Created Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Suppliers Section -->
+            <section id="suppliers-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-truck"></i> Suppliers Management</h2>
+                    <button id="add-supplier-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Add New Supplier
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table id="suppliers-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Supplier Name</th>
+                                <th>Created Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Stock Section -->
+            <section id="stock-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-warehouse"></i> Stock Management</h2>
+                    <button id="add-stock-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Add Stock Items
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table id="stock-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Stock No</th>
+                                <th>Product</th>
+                                <th>Supplier</th>
+                                <th>Engine No</th>
+                                <th>Chassis No</th>
+                                <th>Stock Date</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Customers Section -->
+            <section id="customers-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-users"></i> Customer Management</h2>
+                    <button id="add-customer-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Add New Customer
+                    </button>
+                </div>
+
+                <div class="table-container">
+                    <table id="customers-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Account No</th>
+                                <th>CNIC</th>
+                                <th>Phone</th>
+                                <th>Address</th>
+                                <th>Registration Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Installments Section -->
+            <section id="installments-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-credit-card"></i> Installment Management</h2>
+                    <div class="search-container">
+                        <input type="text" id="customer-search" placeholder="Search customer by account no or CNIC">
+                        <button id="search-customer-btn" class="btn btn-secondary">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="installment-container">
+                    <div class="customer-info-panel">
+                        <h3>Customer Information</h3>
+                        <div id="customer-details"></div>
+                    </div>
+                    
+                    <div class="installment-panel">
+                        <h3>Installment Details</h3>
+                        <div id="installment-details"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Cash Sales Section -->
+            <section id="cash-sales-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-shopping-cart"></i> Cash Sales Management</h2>
+                    <button id="add-cash-sale-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Record Cash Sale
+                    </button>
+                </div>
+                
+                <div id="cash-sales-list"></div>
+            </section>
+
+            <!-- Supplier Payments Section -->
+            <section id="supplier-payments-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-money-bill"></i> Supplier Payments</h2>
+                    <button id="add-supplier-payment-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        Record Payment
+                    </button>
+                </div>
+                
+                <div id="supplier-balances-summary"></div>
+                <div id="supplier-payments-list"></div>
+            </section>
+
+            <!-- Expenses Section -->
+            <section id="expenses-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-receipt"></i> Expense Management</h2>
+                    <div class="header-actions">
+                        <button id="add-expense-type-btn" class="btn btn-secondary">
+                            <i class="fas fa-tags"></i>
+                            Add Expense Type
+                        </button>
+                        <button id="add-expense-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            Add Expense
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="expenses-tabs">
+                    <div class="tab-nav">
+                        <button class="tab-btn active" data-tab="expenses">Expenses</button>
+                        <button class="tab-btn" data-tab="expense-types">Expense Types</button>
+                    </div>
+                    <div id="expenses-tab" class="tab-content active">
+                        <div id="expenses-list"></div>
+                    </div>
+                    <div id="expense-types-tab" class="tab-content">
+                        <div id="expense-types-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dues & Reminders Section -->
+            <section id="dues-reminders-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-bell"></i> Dues & Reminders</h2>
+                    <div class="header-actions">
+                        <button id="send-reminders-btn" class="btn btn-warning">
+                            <i class="fas fa-envelope"></i>
+                            Send Reminders
+                        </button>
+                        <button id="refresh-dues-btn" class="btn btn-secondary">
+                            <i class="fas fa-refresh"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="dues-summary">
+                    <div id="dues-summary-cards"></div>
+                </div>
+                
+                <div class="dues-tabs">
+                    <div class="tab-nav">
+                        <button class="tab-btn active" data-tab="installment-dues">Installment Dues</button>
+                        <button class="tab-btn" data-tab="cash-sale-dues">Cash Sale Dues</button>
+                        <button class="tab-btn" data-tab="overdue">Overdue</button>
+                    </div>
+                    <div id="installment-dues-tab" class="tab-content active">
+                        <div id="installment-dues-list"></div>
+                    </div>
+                    <div id="cash-sale-dues-tab" class="tab-content">
+                        <div id="cash-sale-dues-list"></div>
+                    </div>
+                    <div id="overdue-tab" class="tab-content">
+                        <div id="overdue-dues-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reports Section -->
+            <section id="reports-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-bar"></i> Reports</h2>
+                </div>
+                
+                <div class="reports-date-controls" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+                    <h3 style="margin-bottom: 15px; color: #333;"><i class="fas fa-calendar-alt"></i> Date Range Selection</h3>
+                    <div class="date-controls" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 15px; align-items: end;">
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 500;">Start Date</label>
+                            <input type="date" id="reports-start-date" class="form-input" 
+                                   value="" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 500;">End Date</label>
+                            <input type="date" id="reports-end-date" class="form-input" 
+                                   value="" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" style="font-weight: 500;">Quick Select</label>
+                            <select id="reports-quick-select" class="form-input" 
+                                    style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                                <option value="">Select Range...</option>
+                                <option value="today">Today</option>
+                                <option value="yesterday">Yesterday</option>
+                                <option value="this-week">This Week</option>
+                                <option value="last-week">Last Week</option>
+                                <option value="this-month">This Month</option>
+                                <option value="last-month">Last Month</option>
+                                <option value="this-year">This Year</option>
+                                <option value="last-3-months">Last 3 Months</option>
+                                <option value="last-6-months">Last 6 Months</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button id="reset-date-range-btn" class="btn btn-secondary" 
+                                    style="background: #6c757d; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">
+                                <i class="fas fa-undo"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+                    <p class="text-muted" style="margin-top: 10px; font-size: 14px;">Select a date range to filter all reports. Leave blank to use current month data.</p>
+                </div>
+                
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>Monthly Collection Report</h3>
+                        <p>Installment and cash sale collections</p>
+<button class="btn btn-primary" onclick="window.generateReport('monthly')">Generate</button>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Customer Outstanding Report</h3>
+                        <p>All pending amounts across modules</p>
+<button class="btn btn-primary" onclick="window.generateReport('outstanding')">Generate</button>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Cash Sales Report</h3>
+                        <p>Cash transaction summary</p>
+<button class="btn btn-primary" onclick="window.generateReport('cashsales')">Generate</button>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Supplier Payments Report</h3>
+                        <p>Payments made to suppliers</p>
+<button class="btn btn-primary" onclick="window.generateReport('supplier')">Generate</button>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Expense Report</h3>
+                        <p>Business expenses breakdown</p>
+<button class="btn btn-primary" onclick="window.generateReport('expense')">Generate</button>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Stock Report</h3>
+                        <p>Inventory and sales status</p>
+<button class="btn btn-primary" onclick="window.generateReport('stock')">Generate</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal Container -->
+    <div id="modal-container"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="scripts/database.js"></script>
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/products.js"></script>
+    <script src="scripts/suppliers.js"></script>
+    <script src="scripts/stock.js"></script>
+    <script src="scripts/customers.js"></script>
+    <script src="scripts/installments.js"></script>
+    <script src="scripts/cash-sales.js"></script>
+    <script src="scripts/supplier-payments.js"></script>
+    <script src="scripts/expenses.js"></script>
+    <script src="scripts/dues-reminders.js"></script>
+    <script src="scripts/reports.js"></script>
+    <script src="scripts/calculator.js"></script>
+    <script src="scripts/dashboard.js"></script>
+    <script src="scripts/main.js"></script>
+</body>
+</html>

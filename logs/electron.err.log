@@ -1,0 +1,15 @@
+[16104:1009/161924.297:WARNING:electron_api_native_image.cc(194)] Failed to load image from path 'C:\Users\Dell\installment-management-app\assets\icon.png'
+[16104:1009/161924.331:ERROR:cache_util_win.cc(20)] Unable to move the cache: Access is denied. (0x5)
+[16104:1009/161924.335:ERROR:cache_util_win.cc(20)] Unable to move the cache: Access is denied. (0x5)
+[16104:1009/161924.338:ERROR:disk_cache.cc(205)] Unable to create cache
+[16104:1009/161924.338:ERROR:gpu_disk_cache.cc(676)] Gpu Cache Creation failed: -2
+[16104:1009/161924.338:ERROR:disk_cache.cc(205)] Unable to create cache
+[16104:1009/161924.339:ERROR:gpu_disk_cache.cc(676)] Gpu Cache Creation failed: -2
+[16104:1009/161925.060:INFO:CONSOLE(2)] "%cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.", source: node:electron/js2c/renderer_init (2)
