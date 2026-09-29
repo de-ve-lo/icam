@@ -164,71 +164,13 @@ class Utils {
     }
     
     // Installment calculation utilities
-    static calculateInstallmentSchedule({
-        salePrice,
-        purchasePrice,
-        profitPercentage,
-        advancePayment = 0,
-        installmentMonths,
-        startDate,
-        // Optional explicit override if caller wants to provide a fixed profit amount
-        profitAmountOverride
-    }) {
-        // Net principal to finance after advance
-        const principal = Math.max(0, Math.round(salePrice - advancePayment));
-
-        // Determine profit amount: prefer percentage of principal; fall back to override; finally margin
-        let profitAmount;
-        if (typeof profitPercentage === 'number' && !isNaN(profitPercentage)) {
-            profitAmount = Math.round((principal * profitPercentage) / 100);
-        } else if (typeof profitAmountOverride === 'number' && !isNaN(profitAmountOverride)) {
-            profitAmount = Math.round(profitAmountOverride);
-        } else {
-            // Fallback to product margin if no percentage/override provided
-            profitAmount = Math.max(0, Math.round(salePrice - purchasePrice));
-        }
-
-        // Total to schedule is principal plus profit (both rounded to whole rupees)
-        const totalAmount = principal + profitAmount;
-        const remainingAmount = totalAmount;
-
-        // Round monthly installment to nearest rupee (no decimals)
-        const baseInstallment = Math.round(remainingAmount / installmentMonths);
-        
-        const schedule = [];
-        let currentDate = new Date(startDate);
-        let remainingBalance = Math.round(remainingAmount);
-        
-        for (let i = 1; i <= installmentMonths; i++) {
-            currentDate = this.addMonths(currentDate, 1);
-            // For the last installment, use the remaining to eliminate rounding drift
-            const installmentAmount = i === installmentMonths ? remainingBalance : baseInstallment;
-            
-            schedule.push({
-                installment_no: i,
-                due_date: this.formatDate(currentDate, 'YYYY-MM-DD'),
-                amount: installmentAmount,
-                remaining_balance: remainingBalance
-            });
-            
-            remainingBalance = Math.max(0, Math.round(remainingBalance - installmentAmount));
-        }
-        
-        return {
-            schedule,
-            summary: {
-                salePrice,
-                purchasePrice,
-                profitAmount,
-                // Profit percentage relative to financed principal
-                profitPercentage: principal > 0 ? this.roundTo((profitAmount / principal) * 100, 2) : 0,
-                totalAmount: Math.round(totalAmount),
-                advancePayment: Math.round(advancePayment),
-                remainingAmount: Math.round(remainingAmount),
-                monthlyInstallment: baseInstallment,
-                installmentMonths
-            }
-        };
+    static calculateInstallmentSchedule(params) {
+        const result = InstallmentEngine.createSchedule(params);
+        result.schedule = result.schedule.map(row => ({
+            ...row,
+            amount: row.original_amount
+        }));
+        return result;
     }
     
     static calculateProfitPercentage(salePrice, purchasePrice) {
