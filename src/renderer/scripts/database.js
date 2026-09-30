@@ -47,15 +47,15 @@ class Database {
 
     static async addProduct(product) {
         return await this.run(
-            'INSERT INTO products (item_name, current_price, purchase_price) VALUES (?, ?, ?)',
-            [product.item_name, product.current_price, product.purchase_price]
+            'INSERT INTO products (item_name, current_price, purchase_price, category, unit) VALUES (?, ?, ?, ?, ?)',
+            [product.item_name, product.current_price, product.purchase_price, product.category || 'bike', product.unit || 'piece']
         );
     }
 
     static async updateProduct(id, product) {
         return await this.run(
-            'UPDATE products SET item_name = ?, current_price = ?, purchase_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [product.item_name, product.current_price, product.purchase_price, id]
+            'UPDATE products SET item_name = ?, current_price = ?, purchase_price = ?, category = ?, unit = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [product.item_name, product.current_price, product.purchase_price, product.category || 'bike', product.unit || 'piece', id]
         );
     }
 
@@ -99,8 +99,15 @@ class Database {
 
     static async addStock(stock) {
         return await this.run(
-            'INSERT INTO stock (product_id, supplier_id, engine_no, chassis_no, stock_date, stock_no) VALUES (?, ?, ?, ?, ?, ?)',
-            [stock.product_id, stock.supplier_id, stock.engine_no, stock.chassis_no, stock.stock_date, stock.stock_no]
+            'INSERT INTO stock (product_id, supplier_id, engine_no, chassis_no, stock_date, stock_no, imei, reg_no, serial_no, quantity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [stock.product_id, stock.supplier_id, stock.engine_no || null, stock.chassis_no || null, stock.stock_date, stock.stock_no, stock.imei || null, stock.reg_no || null, stock.serial_no || null, stock.quantity != null ? stock.quantity : 1]
+        );
+    }
+
+    static async logAudit({ userId = null, action, entityType = null, entityId = null, amount = null, detail = null } = {}) {
+        return await this.run(
+            'INSERT INTO audit_log (user_id, action, entity_type, entity_id, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
+            [userId, action, entityType, entityId, amount, detail]
         );
     }
 
@@ -356,6 +363,13 @@ class Database {
 
         await this.persistEngineRows(result.rows, { paidDate: dateStr });
         await this.insertLedgerEntries(result.ledger, receiptNo);
+        await this.logAudit({
+            action: 'pay',
+            entityType: 'installment',
+            entityId: installmentId,
+            amount,
+            detail: receiptNo
+        });
         return { receiptNo, grandRemaining: result.grandRemaining, credit: result.credit };
     }
 
@@ -524,6 +538,13 @@ class Database {
                 'INSERT INTO discounts (customer_id, purchase_id, amount, reason) VALUES (?, ?, ?, ?)',
                 [installment.customer_id, installment.purchase_id, result.discountAmount, 'Account settlement discount']
             );
+            await this.logAudit({
+                action: 'discount',
+                entityType: 'purchase',
+                entityId: installment.purchase_id,
+                amount: result.discountAmount,
+                detail: receiptNo
+            });
             let expenseType = await this.get('SELECT id FROM expense_types WHERE name = ?', ['Discount']);
             if (!expenseType) {
                 const inserted = await this.run(
@@ -832,6 +853,12 @@ class Database {
                 [' [voided]', reason || 'Voided', last.id]
             );
         }
+        await this.logAudit({
+            action: 'void',
+            entityType: 'installment',
+            entityId: installmentId,
+            detail: reason || 'Voided'
+        });
     }
 
     static async setInstallmentPaidAmount(installmentId, newPaid) {
@@ -896,6 +923,12 @@ class Database {
         if (purchaseRow && purchaseRow.stock_id) {
             await this.run('UPDATE stock SET is_sold = 0 WHERE id = ?', [purchaseRow.stock_id]);
         }
+        await this.logAudit({
+            action: 'delete_schedule',
+            entityType: 'purchase',
+            entityId: purchaseId,
+            detail: reason || ''
+        });
     }
 
     // Safe query wrapper to prevent crashes

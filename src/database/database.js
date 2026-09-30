@@ -317,6 +317,63 @@ class DatabaseManager {
         console.log('Migration applied: payments.created_by');
       }
 
+      if (!(await this.columnExists('products', 'category'))) {
+        await this.run("ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'bike'");
+        console.log('Migration applied: products.category');
+      }
+      if (!(await this.columnExists('products', 'unit'))) {
+        await this.run("ALTER TABLE products ADD COLUMN unit TEXT DEFAULT 'piece'");
+        console.log('Migration applied: products.unit');
+      }
+
+      if (!(await this.columnExists('stock', 'imei'))) {
+        await this.run('ALTER TABLE stock ADD COLUMN imei TEXT');
+        console.log('Migration applied: stock.imei');
+      }
+      if (!(await this.columnExists('stock', 'reg_no'))) {
+        await this.run('ALTER TABLE stock ADD COLUMN reg_no TEXT');
+        console.log('Migration applied: stock.reg_no');
+      }
+      if (!(await this.columnExists('stock', 'serial_no'))) {
+        await this.run('ALTER TABLE stock ADD COLUMN serial_no TEXT');
+        console.log('Migration applied: stock.serial_no');
+      }
+      if (!(await this.columnExists('stock', 'quantity'))) {
+        await this.run('ALTER TABLE stock ADD COLUMN quantity INTEGER DEFAULT 1');
+        console.log('Migration applied: stock.quantity');
+      }
+      await this.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_imei ON stock(imei) WHERE imei IS NOT NULL');
+
+      await this.run(`CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('admin','employee')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      await this.run(`CREATE TABLE IF NOT EXISTS shop_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        shop_name TEXT NOT NULL DEFAULT 'Installment Management',
+        phone TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        logo_path TEXT DEFAULT '',
+        idle_minutes INTEGER DEFAULT 30
+      )`);
+      await this.run("INSERT OR IGNORE INTO shop_settings (id, shop_name) VALUES (1, 'Installment Management')");
+
+      await this.run(`CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id INTEGER,
+        amount REAL,
+        detail TEXT
+      )`);
+
     } catch (e) {
       console.error('Migration error:', e);
     }
