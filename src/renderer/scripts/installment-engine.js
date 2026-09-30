@@ -4,8 +4,17 @@
   } else {
     const exported = factory();
     root.InstallmentEngine = exported.InstallmentEngine;
+    root.EngineError = exported.EngineError;
   }
 }(typeof self !== 'undefined' ? self : this, function () {
+  class EngineError extends Error {
+    constructor(code, message) {
+      super(message);
+      this.name = 'EngineError';
+      this.code = code;
+    }
+  }
+
   function parseLocalDate(dateStr) {
     const parts = String(dateStr).split('-');
     const y = Number(parts[0]);
@@ -139,8 +148,72 @@
 
       const { grandRemaining, credit, net } = this.totals(copies);
       return { rows: copies, grandRemaining, credit, net };
+    },
+
+    applyPayment(rows, { installmentId, amount, paymentDate, customerId, purchaseId, receiptNo }) {
+      if (!(amount > 0)) {
+        throw new EngineError('InvalidAmount', 'Amount must be greater than 0');
+      }
+
+      const copies = (rows || []).map((row) => ({ ...row }));
+      copies.sort((a, b) => a.installment_no - b.installment_no);
+
+      const target = copies.find((row) => row.id === installmentId);
+      if (!target) {
+        throw new EngineError('NotFound', 'Installment not found');
+      }
+
+      const allocations = new Map();
+      allocations.set(target.id, amount);
+      target.paid_amount = (Number(target.paid_amount) || 0) + amount;
+
+      let working = copies;
+      const startIndex = working.findIndex((row) => row.id === installmentId);
+
+      for (let i = startIndex; i < working.length; i++) {
+        const rec = this.reconcile(working, paymentDate);
+        working = rec.rows;
+        const row = working[i];
+        const displayDue = Number(row.amount) || 0;
+        const paid = Number(row.paid_amount) || 0;
+        const excess = paid - displayDue;
+        if (excess > 0 && i < working.length - 1) {
+          row.paid_amount = displayDue;
+          working[i + 1].paid_amount = (Number(working[i + 1].paid_amount) || 0) + excess;
+          allocations.set(row.id, (allocations.get(row.id) || 0) - excess);
+          allocations.set(working[i + 1].id, (allocations.get(working[i + 1].id) || 0) + excess);
+        } else {
+          break;
+        }
+      }
+
+      const rec = this.reconcile(working, paymentDate);
+      const ledger = [];
+      for (const row of rec.rows) {
+        const got = allocations.get(row.id) || 0;
+        if (got > 0) {
+          ledger.push({
+            type: 'payment',
+            amount: got,
+            installment_id: row.id,
+            customer_id: customerId,
+            purchase_id: purchaseId,
+            payment_date: paymentDate,
+            receipt_no: receiptNo,
+            notes: 'Payment'
+          });
+        }
+      }
+
+      return {
+        rows: rec.rows,
+        grandRemaining: rec.grandRemaining,
+        credit: rec.credit,
+        net: rec.net,
+        ledger
+      };
     }
   };
 
-  return { InstallmentEngine };
+  return { InstallmentEngine, EngineError };
 }));

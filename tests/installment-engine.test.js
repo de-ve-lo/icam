@@ -68,3 +68,54 @@ describe('reconcile', () => {
     assert.ok(rows.every((r) => r.original_amount === 10000));
   });
 });
+
+describe('applyPayment', () => {
+  it('scenario 2: partial on current #1', () => {
+    const paid = InstallmentEngine.applyPayment(fourBy10k(), {
+      installmentId: 1, amount: 4000, paymentDate: '2026-01-01',
+      customerId: 9, purchaseId: 1, receiptNo: 'R1'
+    });
+    assert.equal(paid.rows[0].paid_amount, 4000);
+    assert.equal(paid.rows[0].status, 'partial');
+    assert.equal(paid.grandRemaining, 36000);
+    assert.equal(paid.ledger[0].customer_id, 9);
+    assert.equal(paid.ledger[0].type, 'payment');
+  });
+
+  it('scenario 3: partial then overdue shifts leftover 6000', () => {
+    const afterPay = InstallmentEngine.applyPayment(fourBy10k(), {
+      installmentId: 1, amount: 4000, paymentDate: '2026-01-01',
+      customerId: 9, purchaseId: 1, receiptNo: 'R1'
+    });
+    const { rows, grandRemaining } = InstallmentEngine.reconcile(afterPay.rows, '2026-01-15');
+    assert.equal(rows[0].status, 'short');
+    assert.equal(rows[0].paid_amount, 4000);
+    assert.equal(rows[1].amount, 16000);
+    assert.equal(grandRemaining, 36000);
+  });
+
+  it('scenario 5: overpay 25000 on doubled #2', () => {
+    const shifted = InstallmentEngine.reconcile(fourBy10k(), '2026-01-15').rows;
+    const paid = InstallmentEngine.applyPayment(shifted, {
+      installmentId: 2, amount: 25000, paymentDate: '2026-01-20',
+      customerId: 9, purchaseId: 1, receiptNo: 'R2'
+    });
+    assert.equal(paid.grandRemaining, 15000);
+    assert.equal(paid.rows[1].status, 'paid');
+    assert.ok(paid.rows[2].paid_amount >= 5000);
+  });
+
+  it('overpay past last row creates credit', () => {
+    const lastOnly = [{
+      id: 1, purchase_id: 1, installment_no: 1, due_date: '2026-06-01',
+      original_amount: 10000, paid_amount: 0, amount: 10000,
+      remaining_balance: 10000, status: 'upcoming'
+    }];
+    const paid = InstallmentEngine.applyPayment(lastOnly, {
+      installmentId: 1, amount: 12000, paymentDate: '2026-06-01',
+      customerId: 9, purchaseId: 1, receiptNo: 'R3'
+    });
+    assert.equal(paid.grandRemaining, 0);
+    assert.equal(paid.credit, 2000);
+  });
+});
