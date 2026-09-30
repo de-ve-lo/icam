@@ -119,3 +119,48 @@ describe('applyPayment', () => {
     assert.equal(paid.credit, 2000);
   });
 });
+
+describe('payRemaining, void, setPaidAmount', () => {
+  it('scenario 8: pay remaining 15000 no discount', () => {
+    const r = InstallmentEngine.payRemaining(fourBy10k(), {
+      amount: 15000, markAsDiscount: false, paymentDate: '2026-01-20',
+      customerId: 9, purchaseId: 1, receiptNo: 'R4'
+    });
+    assert.equal(r.grandRemaining, 25000);
+    assert.equal(r.purchaseStatus, 'active');
+    assert.ok(r.ledger.every((l) => l.type === 'payment'));
+  });
+
+  it('scenario 9: pay 10000 plus discount closes account', () => {
+    const r = InstallmentEngine.payRemaining(fourBy10k(), {
+      amount: 10000, markAsDiscount: true, paymentDate: '2026-01-20',
+      customerId: 9, purchaseId: 1, receiptNo: 'R5'
+    });
+    assert.equal(r.grandRemaining, 0);
+    assert.equal(r.discountAmount, 30000);
+    assert.equal(r.purchaseStatus, 'completed');
+    assert.ok(r.rows.every((row) => row.status === 'settled'));
+    assert.ok(r.ledger.some((l) => l.type === 'discount' && l.amount === 30000));
+  });
+
+  it('scenario 10: void last payment restores grand', () => {
+    const paid = InstallmentEngine.applyPayment(fourBy10k(), {
+      installmentId: 1, amount: 4000, paymentDate: '2026-01-01',
+      customerId: 9, purchaseId: 1, receiptNo: 'R1'
+    });
+    const voided = InstallmentEngine.voidLastPayment(paid.rows, paid.ledger, 1);
+    assert.equal(voided.grandRemaining, 40000);
+    assert.equal(voided.rows[0].paid_amount, 0);
+  });
+
+  it('scenario 11: setPaidAmount down does not call applyPayment with negative', () => {
+    const paid = InstallmentEngine.applyPayment(fourBy10k(), {
+      installmentId: 1, amount: 4000, paymentDate: '2026-01-01',
+      customerId: 9, purchaseId: 1, receiptNo: 'R1'
+    });
+    const edited = InstallmentEngine.setPaidAmount(paid.rows, 1, 1000);
+    const rec = InstallmentEngine.reconcile(edited, '2026-01-01');
+    assert.equal(rec.rows[0].paid_amount, 1000);
+    assert.equal(rec.grandRemaining, 39000);
+  });
+});

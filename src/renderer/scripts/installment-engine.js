@@ -212,6 +212,128 @@
         net: rec.net,
         ledger
       };
+    },
+
+    payRemaining(rows, { amount, markAsDiscount, paymentDate, customerId, purchaseId, receiptNo }) {
+      if (!(amount > 0)) {
+        throw new EngineError('InvalidAmount', 'Amount must be greater than 0');
+      }
+
+      const copies = (rows || []).map((row) => ({ ...row }));
+      copies.sort((a, b) => a.installment_no - b.installment_no);
+
+      let remainingCash = amount;
+      const ledger = [];
+
+      for (const row of copies) {
+        if (remainingCash <= 0) break;
+        const unpaidOriginal = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
+        if (unpaidOriginal <= 0) continue;
+        const apply = Math.min(remainingCash, unpaidOriginal);
+        row.paid_amount = (Number(row.paid_amount) || 0) + apply;
+        remainingCash -= apply;
+        ledger.push({
+          type: 'payment',
+          amount: apply,
+          installment_id: row.id,
+          customer_id: customerId,
+          purchase_id: purchaseId,
+          payment_date: paymentDate,
+          receipt_no: receiptNo,
+          notes: 'Payment'
+        });
+      }
+
+      let discountAmount = 0;
+      if (markAsDiscount) {
+        for (const row of copies) {
+          const unpaidOriginal = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
+          if (unpaidOriginal > 0) {
+            discountAmount += unpaidOriginal;
+            row.paid_amount = Number(row.original_amount) || 0;
+          }
+          row.status = 'settled';
+          row.amount = Number(row.original_amount) || 0;
+          row.remaining_balance = 0;
+        }
+        if (discountAmount > 0) {
+          ledger.push({
+            type: 'discount',
+            amount: discountAmount,
+            installment_id: copies[copies.length - 1] ? copies[copies.length - 1].id : null,
+            customer_id: customerId,
+            purchase_id: purchaseId,
+            payment_date: paymentDate,
+            receipt_no: receiptNo,
+            notes: 'Discount'
+          });
+        }
+        return {
+          rows: copies,
+          grandRemaining: 0,
+          credit: 0,
+          net: 0,
+          ledger,
+          purchaseStatus: 'completed',
+          discountAmount
+        };
+      }
+
+      const rec = this.reconcile(copies, paymentDate);
+      const purchaseStatus = rec.grandRemaining === 0 ? 'completed' : 'active';
+      return {
+        rows: rec.rows,
+        grandRemaining: rec.grandRemaining,
+        credit: rec.credit,
+        net: rec.net,
+        ledger,
+        purchaseStatus,
+        discountAmount: 0
+      };
+    },
+
+    voidLastPayment(rows, ledgerForInstallment, installmentId) {
+      const copies = (rows || []).map((row) => ({ ...row }));
+      copies.sort((a, b) => a.installment_no - b.installment_no);
+
+      const target = copies.find((row) => row.id === installmentId);
+      if (!target) {
+        throw new EngineError('NotFound', 'Installment not found');
+      }
+
+      const payments = (ledgerForInstallment || []).filter(
+        (entry) => entry.type === 'payment' && (entry.installment_id === installmentId || entry.installmentId === installmentId)
+      );
+      if (payments.length === 0) {
+        throw new EngineError('NotFound', 'No payment to void');
+      }
+
+      const last = payments[payments.length - 1];
+      const voidAmount = Number(last.amount) || 0;
+      target.paid_amount = Math.max(0, (Number(target.paid_amount) || 0) - voidAmount);
+
+      const rec = this.reconcile(copies, target.due_date);
+      return {
+        rows: rec.rows,
+        grandRemaining: rec.grandRemaining,
+        credit: rec.credit,
+        net: rec.net,
+        voidedLedgerId: last.id != null ? last.id : null
+      };
+    },
+
+    setPaidAmount(rows, installmentId, newPaid) {
+      if (newPaid < 0) {
+        throw new EngineError('InvalidAmount', 'Paid amount cannot be negative');
+      }
+
+      const copies = (rows || []).map((row) => ({ ...row }));
+      const target = copies.find((row) => row.id === installmentId);
+      if (!target) {
+        throw new EngineError('NotFound', 'Installment not found');
+      }
+      target.paid_amount = newPaid;
+      return copies;
     }
   };
 
