@@ -304,6 +304,19 @@ class DatabaseManager {
         console.log('Migration applied: discounts soft-delete columns');
       }
 
+      if (!(await this.columnExists('payments', 'type'))) {
+        await this.run("ALTER TABLE payments ADD COLUMN type TEXT DEFAULT 'payment'");
+        console.log('Migration applied: payments.type');
+      }
+      if (!(await this.columnExists('payments', 'purchase_id'))) {
+        await this.run('ALTER TABLE payments ADD COLUMN purchase_id INTEGER');
+        console.log('Migration applied: payments.purchase_id');
+      }
+      if (!(await this.columnExists('payments', 'created_by'))) {
+        await this.run('ALTER TABLE payments ADD COLUMN created_by INTEGER');
+        console.log('Migration applied: payments.created_by');
+      }
+
     } catch (e) {
       console.error('Migration error:', e);
     }

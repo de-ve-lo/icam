@@ -277,59 +277,86 @@ class Database {
         `, [customerId]);
     }
 
-    // CORRECTED Payment method with proper value shifting logic
-    static async payInstallment(installmentId, amount) {
-        console.log(`💰 PayInstallment called: installmentId=${installmentId}, amount=${amount}`);
+    static localToday() {
+        if (typeof Utils !== 'undefined' && Utils.toLocalDateString) {
+            return Utils.toLocalDateString(new Date());
+        }
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
 
-        if (amount <= 0) return { receiptNo: null };
+    static async loadPurchaseInstallments(purchaseId) {
+        return await this.query(`
+            SELECT * FROM installments
+            WHERE purchase_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY installment_no ASC
+        `, [purchaseId]);
+    }
 
-        // 1. Get Details
-        const installment = await this.get(`SELECT * FROM installments WHERE id = ?`, [installmentId]);
+    static async persistEngineRows(rows, { updatePaid = true, paidDate = null } = {}) {
+        const dateStr = paidDate || this.localToday();
+        for (const row of rows) {
+            if (updatePaid) {
+                await this.run(
+                    'UPDATE installments SET paid_amount = ?, amount = ?, remaining_balance = ?, status = ?, paid_date = CASE WHEN ? > 0 THEN COALESCE(paid_date, ?) ELSE paid_date END WHERE id = ?',
+                    [row.paid_amount, row.amount, row.remaining_balance, row.status, row.paid_amount, dateStr, row.id]
+                );
+            } else {
+                await this.run(
+                    'UPDATE installments SET amount = ?, remaining_balance = ?, status = ? WHERE id = ?',
+                    [row.amount, row.remaining_balance, row.status, row.id]
+                );
+            }
+        }
+    }
+
+    static async insertLedgerEntries(ledger, receiptNo) {
+        const usedReceipt = receiptNo || this.generateReceiptNo();
+        for (const entry of ledger) {
+            await this.run(
+                'INSERT INTO payments (installment_id, customer_id, purchase_id, amount, payment_date, receipt_no, notes, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    entry.installment_id,
+                    entry.customer_id,
+                    entry.purchase_id,
+                    entry.amount,
+                    entry.payment_date,
+                    entry.receipt_no || usedReceipt,
+                    entry.notes,
+                    entry.type || 'payment'
+                ]
+            );
+        }
+        return usedReceipt;
+    }
+
+    static async payInstallment(installmentId, amount, paymentDate) {
+        const dateStr = paymentDate || this.localToday();
+        const installment = await this.get(`
+            SELECT i.*, cp.customer_id, cp.id as purchase_id
+            FROM installments i
+            JOIN customer_purchases cp ON cp.id = i.purchase_id
+            WHERE i.id = ? AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+        `, [installmentId]);
         if (!installment) throw new Error('Installment not found');
 
-        // 2. Record Payment on THIS installment
-        const currentPaid = installment.paid_amount || 0;
-        const newPaid = currentPaid + amount;
-
-        await this.run(
-            'UPDATE installments SET paid_amount = ?, paid_date = CURRENT_DATE WHERE id = ?',
-            [newPaid, installmentId]
-        );
-
-        // 3. Record Receipt
+        const rows = await this.loadPurchaseInstallments(installment.purchase_id);
         const receiptNo = this.generateReceiptNo();
-        await this.run(
-            'INSERT INTO payments (installment_id, customer_id, amount, payment_date, receipt_no, notes) VALUES (?, ?, ?, CURRENT_DATE, ?, ?)',
-            [installmentId, installment.purchase_id, amount, receiptNo, 'Payment']
-        ); // Note: customer_id is usually on purchase, fixed access here
+        const result = InstallmentEngine.applyPayment(rows, {
+            installmentId: installment.id,
+            amount,
+            paymentDate: dateStr,
+            customerId: installment.customer_id,
+            purchaseId: installment.purchase_id,
+            receiptNo
+        });
 
-        // 4. Distribute if Overpaid (Physical move of money)
-        // We calculate "Due" as per the last reconcile state to decide if we overpaid
-        // But reconcile will handle logic. However, to keep Ledger clean (no negative shortages),
-        // we should push excess paid_amount to next installments.
-
-        // Check if we paid more than the total required including forwarded/inflated amount?
-        // No, we should check against "Visual Amount" (which includes forwarded)
-        // actualRemaining = amount - paid.
-        // If newPaid > amount?
-
-        // Let's use a simpler approach: Just call reconcile first.
-        // It will calculate 'runningShortage'.
-        // If we want to distribute, we can do it after.
-
-        // For now, let's Stick to the Plan:
-        // "Update installments table... Call reconcileInstallments"
-        // I will add overpayment distribution in a separate step if needed, but Reconcile logic handles "Surplus" by reducing next due.
-        // The user requirement "Ledger must reflect: Payments only... No duplicated balances".
-        // If I pay 2000 on a 1000 due row, Reconcile will see -1000 remaining.
-        // My Reconcile logic: "actualRemaining < 0 ... runningShortage = actualRemaining (Surplus)".
-        // Next row: "totalTarget = base + (-1000)".
-        // This works perfectly for calculation.
-
-        // 5. Reconcile
-        await this.reconcileShortagesForPurchase(installment.purchase_id);
-
-        return { receiptNo };
+        await this.persistEngineRows(result.rows, { paidDate: dateStr });
+        await this.insertLedgerEntries(result.ledger, receiptNo);
+        return { receiptNo, grandRemaining: result.grandRemaining, credit: result.credit };
     }
 
     // CORRECTED Overpayment distribution with proper value shifting
@@ -417,42 +444,10 @@ class Database {
         return receiptNo;
     }
 
-    // Deprecated helpers removed (handled by reconcileShortagesForPurchase now)
-    static async handlePartialPaymentCarryover(pid, cid, amt) { }
-    static async carryShortageToNext(pid, idx, amt, all) { }
-
-    // Helper method to carry shortage to next installments
-    static async carryShortageToNext(purchaseId, currentIndex, shortageAmount, allInstallments) {
-        console.log(`💸 Carrying shortage: ${shortageAmount} from index ${currentIndex}`);
-
-        // Find the next unpaid installment
-        for (let i = currentIndex + 1; i < allInstallments.length; i++) {
-            const nextInstallment = allInstallments[i];
-
-            if (nextInstallment.status !== 'paid') {
-                const currentAmount = nextInstallment.amount || 0;
-                const newAmount = currentAmount + shortageAmount;
-                const currentPaid = nextInstallment.paid_amount || 0;
-                const newRemaining = Math.max(0, newAmount - currentPaid);
-
-                console.log(`💸 Adding ${shortageAmount} shortage to installment ${nextInstallment.installment_no}: ${currentAmount} -> ${newAmount}`);
-
-                await this.run(
-                    'UPDATE installments SET amount = ?, remaining_balance = ? WHERE id = ?',
-                    [newAmount, newRemaining, nextInstallment.id]
-                );
-                break;
-            }
-        }
-    }
-
-    // Enhanced shortage reconciliation - VALUE SHIFTING approach
     static async reconcileShortagesForCustomer(customerId) {
-        console.log(`🔄 Reconciling shortages for customer ${customerId} - Value Shifting Approach`);
-
         const purchases = await this.query(`
-            SELECT DISTINCT cp.id as purchase_id 
-            FROM customer_purchases cp 
+            SELECT DISTINCT cp.id as purchase_id
+            FROM customer_purchases cp
             WHERE cp.customer_id = ? AND cp.status != 'deleted' AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
         `, [customerId]);
 
@@ -462,126 +457,11 @@ class Database {
     }
 
     static async reconcileShortagesForPurchase(purchaseId) {
-        console.log(`🔄 Reconciling shortages for purchase ${purchaseId}`);
-
-        try {
-            const installments = await this.query(`
-                SELECT * FROM installments 
-                WHERE purchase_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-                ORDER BY installment_no ASC
-            `, [purchaseId]);
-
-            if (!installments || installments.length === 0) return;
-
-            const parseDateSafe = (value) => {
-                if (!value) return null;
-                const d = new Date(value);
-                return isNaN(d.getTime()) ? null : d;
-            };
-
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            let runningShortage = 0;
-
-            for (const inst of installments) {
-                // Ensure original_amount is set
-                if (!inst.original_amount && inst.original_amount !== 0) {
-                    // Fallback if migration missed somehow, but migration should have run
-                    inst.original_amount = inst.amount;
-                }
-                const baseAmount = Number(inst.original_amount);
-                const paidAmount = Number(inst.paid_amount || 0);
-                const dueDate = parseDateSafe(inst.due_date);
-                const isOverdue = dueDate && dueDate < today;
-
-                const totalTarget = baseAmount + runningShortage;
-                const actualRemaining = totalTarget - paidAmount;
-
-                let newStatus = inst.status;
-                let newAmount = totalTarget; // Visual Due Amount
-                let newRemaining = Math.max(0, actualRemaining);
-
-                if (isOverdue) {
-                    // Past Due Logic
-                    if (actualRemaining > 0) {
-                        // Not fully settled
-                        // Not fully settled
-                        newRemaining = 0; // Visual remaining is 0 (as it moves forward)
-                        newAmount = 0;    // Visual amount is 0 (Forwarded)
-
-
-                        // Determing Status: 'paid' if base is covered, 'short' otherwise
-                        if (paidAmount >= baseAmount) {
-                            newStatus = 'paid';
-                        } else {
-                            newStatus = 'short';
-                        }
-
-                        runningShortage = actualRemaining; // Push forward
-                    } else {
-                        // Fully settled
-                        newStatus = 'paid'; // or 'settled'
-                        newAmount = paidAmount; // Show what was paid
-                        newRemaining = 0;
-                        runningShortage = actualRemaining; // Should be <= 0 (Surplus)
-                    }
-                } else {
-                    // Upcoming Logic
-                    if (actualRemaining <= 0) {
-                        newStatus = 'paid';
-                        newRemaining = 0;
-                        newAmount = Math.max(0, totalTarget);
-                        runningShortage = actualRemaining; // Surplus moves to next
-                    } else {
-                        // Still due
-                        newStatus = paidAmount > 0 ? 'partial' : 'upcoming';
-                        newAmount = totalTarget;
-                        newRemaining = actualRemaining;
-                        runningShortage = 0; // Absorbed here
-                    }
-                }
-
-                // Update DB if changed
-                if (inst.amount !== newAmount || inst.remaining_balance !== newRemaining || inst.status !== newStatus) {
-                    await this.run(
-                        'UPDATE installments SET amount = ?, remaining_balance = ?, status = ? WHERE id = ?',
-                        [newAmount, newRemaining, newStatus, inst.id]
-                    );
-                    // Update local object for next iteration logic if needed? 
-                    // No, reliance is on calculated variables.
-                }
-            }
-
-            // Handle leftover shortage (if last installment is short)
-            if (runningShortage > 0) {
-                console.warn(`⚠️ Purchase ${purchaseId} has floating shortage ${runningShortage} after last installment.`);
-                // We might need to add it to the last installment visually or handle it?
-                // For now, it stays on the last installment implicitly via the loop, 
-                // BUT the loop logic above sets Amount=0 for overdue.
-                // If the LAST installment is overdue, it hides the amount.
-                // WE MUST reveal it if there is no "Next" installment.
-                // Fix: The loop above puts it in runningShortage.
-
-                // Let's re-update the very last installment to show the debt if it's the end of the line
-                // user says "Forwarded amounts... Must exist only in the next upcoming installment".
-                // If there is NO next, it should probably stay on the last one.
-
-                const lastInst = installments[installments.length - 1];
-                const lastDueDate = parseDateSafe(lastInst.due_date);
-                if (lastDueDate < today) {
-                    // It was marked short/0. Revert it to show the debt?
-                    // "All installments are overdue (short)... System works even if 100% overdue"
-                    // User Example 6: "Installment - Status Short - Payable 0".
-                    // Then says in "Additional Improvements": "Accumulated shortage... will be collected".
-                    // The UI script I saw in `installments.js` (Step 50) handles "All Short" by showing a banner.
-                    // So keeping it 0 is correct for the table. The banner handles the total.
-                }
-            }
-
-        } catch (error) {
-            console.error('Error in reconcile:', error);
-        }
+        const installments = await this.loadPurchaseInstallments(purchaseId);
+        if (!installments || installments.length === 0) return;
+        const rec = InstallmentEngine.reconcile(installments, this.localToday());
+        await this.persistEngineRows(rec.rows, { updatePaid: false });
+        return rec;
     }
 
     // Debug method to log installment states
@@ -603,141 +483,62 @@ class Database {
         }
     }
 
-    // Advanced Pay Remaining method with corrected value shifting logic
-    static async payRemainingAdvanced(installmentId, amount, markAsDiscount = false) {
-        console.log(`📀 PayRemainingAdvanced: installmentId=${installmentId}, amount=${amount}, discount=${markAsDiscount}`);
-
-        // Get installment and customer details
+    static async payRemainingAdvanced(installmentId, amount, markAsDiscount = false, paymentDate = null) {
+        const dateStr = paymentDate || this.localToday();
         const installment = await this.get(`
             SELECT i.*, cp.customer_id, cp.id as purchase_id
             FROM installments i
             JOIN customer_purchases cp ON cp.id = i.purchase_id
             WHERE i.id = ?
         `, [installmentId]);
+        if (!installment) throw new Error('Installment not found');
 
-        if (!installment) {
-            throw new Error('Installment not found');
+        if (!(amount > 0) && !markAsDiscount) {
+            const current = await this.loadPurchaseInstallments(installment.purchase_id);
+            const totals = InstallmentEngine.totals(current);
+            return {
+                totalRemaining: totals.grandRemaining,
+                discountAmount: 0,
+                totalCoverage: 0,
+                fullySettled: false,
+                receiptNo: null
+            };
         }
 
-        // Reconcile shortages first to ensure accurate calculations
-        await this.reconcileShortagesForPurchase(installment.purchase_id);
-
-        // Get all installments for this purchase after reconciliation
-        let allInstallments = await this.query(`
-            SELECT * FROM installments 
-            WHERE purchase_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY installment_no ASC
-        `, [installment.purchase_id]);
-
-        // Calculate TRUE total remaining using original amounts - prevents double counting
-        let totalRemaining = 0;
-        for (const inst of allInstallments) {
-            if (inst.status !== 'paid' && inst.status !== 'settled') {
-                const originalAmount = inst.original_amount || inst.amount || 0;
-                const paidAmount = inst.paid_amount || 0;
-                const remaining = Math.max(0, originalAmount - paidAmount);
-                totalRemaining += remaining;
-            }
-        }
-
-        console.log(`📀 TRUE Total remaining (using original amounts): ${totalRemaining}`);
-
-        // Generate a single receipt number for this entire transaction (payment + discount)
+        const rows = await this.loadPurchaseInstallments(installment.purchase_id);
         const receiptNo = this.generateReceiptNo();
+        const result = InstallmentEngine.payRemaining(rows, {
+            amount,
+            markAsDiscount,
+            paymentDate: dateStr,
+            customerId: installment.customer_id,
+            purchaseId: installment.purchase_id,
+            receiptNo
+        });
 
-        // STEP 1: Handle payment if amount > 0
-        if (amount > 0) {
-            // Distribute payment across all unpaid installments using the shared receiptNo
-            await this.distributePaymentAcrossInstallments(allInstallments, amount, installment.customer_id, receiptNo);
+        await this.persistEngineRows(result.rows, { paidDate: dateStr });
+        await this.insertLedgerEntries(result.ledger, receiptNo);
 
-            // Reconcile again after payment to get updated states
-            await this.reconcileShortagesForPurchase(installment.purchase_id);
-        }
-
-        // STEP 2: Recalculate remaining balance AFTER payment
-        allInstallments = await this.query(`
-            SELECT * FROM installments 
-            WHERE purchase_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY installment_no ASC
-        `, [installment.purchase_id]);
-
-        let remainingAfterPayment = 0;
-        for (const inst of allInstallments) {
-            if (inst.status !== 'paid' && inst.status !== 'settled') {
-                const originalAmount = inst.original_amount || inst.amount || 0;
-                const paidAmount = inst.paid_amount || 0;
-                const remaining = Math.max(0, originalAmount - paidAmount);
-                remainingAfterPayment += remaining;
-            }
-        }
-
-        console.log(`📀 Remaining balance AFTER payment: ${remainingAfterPayment}`);
-
-        // STEP 3: Calculate discount based on remaining balance AFTER payment
-        const discountAmount = remainingAfterPayment;
-        const totalCoverage = amount + (markAsDiscount ? discountAmount : 0);
-
-        // STEP 4: Handle discount if checkbox is checked
-        if (markAsDiscount && discountAmount > 0) {
-            // Add discount record
+        if (result.discountAmount > 0) {
             await this.run(
                 'INSERT INTO discounts (customer_id, purchase_id, amount, reason) VALUES (?, ?, ?, ?)',
-                [installment.customer_id, installment.purchase_id, discountAmount, 'Account settlement discount']
+                [installment.customer_id, installment.purchase_id, result.discountAmount, 'Account settlement discount']
             );
-
-            // Record discount as expense
-            // First, ensure "Discount" expense type exists
             let expenseType = await this.get('SELECT id FROM expense_types WHERE name = ?', ['Discount']);
             if (!expenseType) {
-                const result = await this.run(
+                const inserted = await this.run(
                     'INSERT INTO expense_types (name, description) VALUES (?, ?)',
                     ['Discount', 'Settlement discounts given to customers']
                 );
-                expenseType = { id: result.id };
+                expenseType = { id: inserted.id };
             }
-
-            // Record the expense
             await this.run(
-                'INSERT INTO expenses (expense_type_id, amount, date, notes) VALUES (?, ?, CURRENT_DATE, ?)',
-                [expenseType.id, discountAmount, `Settlement discount for Account #${installment.customer_id} - Receipt ${receiptNo}`]
+                'INSERT INTO expenses (expense_type_id, amount, date, notes) VALUES (?, ?, ?, ?)',
+                [expenseType.id, result.discountAmount, dateStr, `Settlement discount for Account #${installment.customer_id} - Receipt ${receiptNo}`]
             );
+        }
 
-            console.log(`📀 Discount applied: ${discountAmount} and recorded as expense`);
-
-            // Mark all remaining installments as settled
-            for (const inst of allInstallments) {
-                // Skip installments that are already paid, settled, OR short (short means balance was forwarded)
-                if (inst.status === 'paid' || inst.status === 'settled' || inst.status === 'short') {
-                    continue;
-                }
-
-                const originalAmount = inst.original_amount || inst.amount || 0;
-                const paidAmount = inst.paid_amount || 0;
-                const remaining = Math.max(0, originalAmount - paidAmount);
-
-                if (remaining > 0) {
-                    // Settle the installment by marking it as paid with settlement
-                    const newPaidAmount = paidAmount + remaining;
-                    await this.run(
-                        'UPDATE installments SET paid_amount = ?, status = ?, remaining_balance = 0, paid_date = CURRENT_DATE WHERE id = ?',
-                        [newPaidAmount, 'settled', inst.id]
-                    );
-
-                    // Record settlement payment using the SAME receiptNo
-                    await this.run(
-                        'INSERT INTO payments (installment_id, customer_id, amount, payment_date, receipt_no, notes) VALUES (?, ?, ?, CURRENT_DATE, ?, ?)',
-                        [inst.id, installment.customer_id, remaining, receiptNo, 'Account settlement via discount']
-                    );
-                } else {
-                    // Just update status
-                    await this.run(
-                        'UPDATE installments SET status = ? WHERE id = ?',
-                        ['settled', inst.id]
-                    );
-                }
-            }
-
-            // Mark purchase as completed
+        if (result.purchaseStatus === 'completed') {
             await this.run(
                 'UPDATE customer_purchases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                 ['completed', installment.purchase_id]
@@ -745,52 +546,12 @@ class Database {
         }
 
         return {
-            totalRemaining,
-            discountAmount,
-            totalCoverage,
-            fullySettled: totalCoverage >= totalRemaining
+            totalRemaining: result.grandRemaining + (result.discountAmount || 0),
+            discountAmount: result.discountAmount || 0,
+            totalCoverage: amount + (result.discountAmount || 0),
+            fullySettled: result.purchaseStatus === 'completed',
+            receiptNo
         };
-    }
-
-    // Helper to distribute payment across multiple installments
-    static async distributePaymentAcrossInstallments(allInstallments, totalPayment, customerId, existingReceiptNo = null) {
-        console.log(`🔄 Distributing ${totalPayment} across ${allInstallments.length} installments`);
-
-        let remainingPayment = totalPayment;
-        const receiptNo = existingReceiptNo || this.generateReceiptNo();
-
-        for (const installment of allInstallments) {
-            if (remainingPayment <= 0) break;
-
-            if (installment.status === 'paid' || installment.status === 'settled') {
-                continue;
-            }
-
-            const dueAmount = installment.amount || 0;
-            const paidAmount = installment.paid_amount || 0;
-            const remaining = Math.max(0, dueAmount - paidAmount);
-
-            if (remaining > 0) {
-                const paymentToApply = Math.min(remainingPayment, remaining);
-                const newPaidAmount = paidAmount + paymentToApply;
-                const newStatus = newPaidAmount >= dueAmount ? 'paid' : 'partial';
-                const newRemaining = Math.max(0, dueAmount - newPaidAmount);
-
-                await this.run(
-                    'UPDATE installments SET paid_amount = ?, paid_date = CURRENT_DATE, status = ?, remaining_balance = ? WHERE id = ?',
-                    [newPaidAmount, newStatus, newRemaining, installment.id]
-                );
-
-                // Record individual payment with shared receipt number
-                await this.run(
-                    'INSERT INTO payments (installment_id, customer_id, amount, payment_date, receipt_no, notes) VALUES (?, ?, ?, CURRENT_DATE, ?, ?)',
-                    [installment.id, customerId, paymentToApply, receiptNo, 'Pay Remaining - distributed payment']
-                );
-
-                remainingPayment -= paymentToApply;
-                console.log(`🔄 Applied ${paymentToApply} to installment ${installment.installment_no}, remaining payment: ${remainingPayment}`);
-            }
-        }
     }
 
     static generateReceiptNo() {
@@ -799,87 +560,8 @@ class Database {
         return `RCP-${timestamp.slice(-6)}${random.toUpperCase()}`;
     }
 
-    // Enhanced payment function with overpayment distribution
     static async payInstallmentWithDistribution(installmentId, amount, paymentDate = null) {
-        const paymentDateStr = paymentDate || new Date().toISOString().slice(0, 10);
-
-        // Get the installment and its customer's all installments
-        const currentInstallment = await this.get(`
-            SELECT i.*, cp.customer_id, cp.id as purchase_id
-            FROM installments i
-            JOIN customer_purchases cp ON cp.id = i.purchase_id
-            WHERE i.id = ? AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
-        `, [installmentId]);
-
-        if (!currentInstallment) {
-            throw new Error('Installment not found');
-        }
-
-        // Get all unpaid installments for this customer's purchase, sorted by installment number
-        const allInstallments = await this.query(`
-            SELECT * FROM installments 
-            WHERE purchase_id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY installment_no ASC
-        `, [currentInstallment.purchase_id]);
-
-        let remainingAmount = amount;
-        const receiptNo = this.generateReceiptNo();
-        const paymentDetails = [];
-
-        // Find the starting installment and distribute payment from there
-        let startDistributing = false;
-
-        for (const installment of allInstallments) {
-            if (installment.id === parseInt(installmentId)) {
-                startDistributing = true;
-            }
-
-            if (!startDistributing) continue;
-
-            const currentPaid = installment.paid_amount || 0;
-            const currentDue = installment.amount || 0;
-            const installmentRemaining = Math.max(0, currentDue - currentPaid);
-
-            if (installmentRemaining === 0 || remainingAmount <= 0) continue;
-
-            const paymentForThisInstallment = Math.min(remainingAmount, installmentRemaining);
-            const newPaidAmount = currentPaid + paymentForThisInstallment;
-            const newStatus = newPaidAmount >= currentDue ? 'paid' : 'partial';
-            const newRemaining = Math.max(0, currentDue - newPaidAmount);
-
-            // Update installment
-            await this.run(
-                'UPDATE installments SET paid_amount = ?, paid_date = ?, status = ?, remaining_balance = ? WHERE id = ?',
-                [newPaidAmount, paymentDateStr, newStatus, newRemaining, installment.id]
-            );
-
-            // Record individual payment entry
-            await this.run(
-                'INSERT INTO payments (installment_id, customer_id, amount, payment_date, receipt_no, notes) VALUES (?, ?, ?, ?, ?, ?)',
-                [installment.id, currentInstallment.customer_id, paymentForThisInstallment, paymentDateStr, receiptNo,
-                installment.id === parseInt(installmentId) ? 'Direct payment' : 'Overpayment distribution']
-            );
-
-            paymentDetails.push({
-                installmentId: installment.id,
-                installmentNo: installment.installment_no,
-                amountPaid: paymentForThisInstallment,
-                status: newStatus,
-                remaining: newRemaining
-            });
-
-            remainingAmount -= paymentForThisInstallment;
-
-            if (remainingAmount <= 0) break;
-        }
-
-        return {
-            receiptNo,
-            totalAmount: amount,
-            distributedAmount: amount - remainingAmount,
-            excessAmount: remainingAmount,
-            paymentDetails
-        };
+        return await this.payInstallment(installmentId, amount, paymentDate);
     }
 
     // Dashboard Statistics
@@ -1106,15 +788,7 @@ class Database {
     }
 
     static async reconcileShortages(purchaseId) {
-        // Delegate to the value-shifting implementation to keep behavior consistent app-wide
         return await this.reconcileShortagesForPurchase(purchaseId);
-    }
-
-    static async reconcileShortagesForCustomer(customerId) {
-        const purchases = await this.getActivePurchasesForCustomer(customerId);
-        for (const p of purchases) {
-            await this.reconcileShortagesForPurchase(p.id);
-        }
     }
 
     // Customer purchase summary
@@ -1133,38 +807,66 @@ class Database {
     }
     // Logical deletion methods
     static async voidPayment(installmentId, reason = '') {
-        console.log(`VOID PAYMENT (LIFO): installmentId=${installmentId}`);
-
-        // 1. Get Latest Payment
-        const lastPayment = await this.get(`
-            SELECT * FROM payments 
-            WHERE installment_id = ? 
-            ORDER BY id DESC LIMIT 1
-        `, [installmentId]);
-
-        if (!lastPayment) {
-            throw new Error('No payments found to void for this installment');
-        }
-
-        const voidAmount = lastPayment.amount;
-
-        // 2. Delete Update Installment
         const installment = await this.get('SELECT * FROM installments WHERE id = ?', [installmentId]);
         if (!installment) throw new Error('Installment not found');
 
-        const newPaid = Math.max(0, (installment.paid_amount || 0) - voidAmount);
-        // Status will be fixed by reconcile, but safe to set 'pending' or 'partial' temporarily?
-        // Reconcile is robust, just update amount.
-        await this.run(
-            'UPDATE installments SET paid_amount = ?, paid_date = (CASE WHEN ? > 0 THEN paid_date ELSE NULL END) WHERE id = ?',
-            [newPaid, newPaid, installmentId]
-        );
+        const rows = await this.loadPurchaseInstallments(installment.purchase_id);
+        const ledger = await this.query(`
+            SELECT * FROM payments
+            WHERE installment_id = ? AND (type IS NULL OR type = 'payment') AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY id ASC
+        `, [installmentId]);
 
-        // 3. Delete the Payment Record
-        await this.run('DELETE FROM payments WHERE id = ?', [lastPayment.id]);
+        const result = InstallmentEngine.voidLastPayment(rows, ledger, installmentId);
+        await this.persistEngineRows(result.rows, { updatePaid: true });
 
-        // 4. Reconcile
-        await this.reconcileShortagesForPurchase(installment.purchase_id);
+        if (result.voidedLedgerId != null) {
+            await this.run(
+                "UPDATE payments SET type = 'void', notes = COALESCE(notes, '') || ?, is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, deleted_reason = ? WHERE id = ?",
+                [' [voided]', reason || 'Voided', result.voidedLedgerId]
+            );
+        } else if (ledger.length > 0) {
+            const last = ledger[ledger.length - 1];
+            await this.run(
+                "UPDATE payments SET type = 'void', notes = COALESCE(notes, '') || ?, is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, deleted_reason = ? WHERE id = ?",
+                [' [voided]', reason || 'Voided', last.id]
+            );
+        }
+    }
+
+    static async setInstallmentPaidAmount(installmentId, newPaid) {
+        const installment = await this.get(`
+            SELECT i.*, cp.customer_id, cp.id as purchase_id
+            FROM installments i
+            JOIN customer_purchases cp ON cp.id = i.purchase_id
+            WHERE i.id = ?
+        `, [installmentId]);
+        if (!installment) throw new Error('Installment not found');
+
+        const rows = await this.loadPurchaseInstallments(installment.purchase_id);
+        const updated = InstallmentEngine.setPaidAmount(rows, installmentId, newPaid);
+        const rec = InstallmentEngine.reconcile(updated, this.localToday());
+        await this.persistEngineRows(rec.rows, { updatePaid: true });
+
+        const currentPaid = Number(installment.paid_amount) || 0;
+        const delta = newPaid - currentPaid;
+        if (delta !== 0) {
+            const receiptNo = this.generateReceiptNo();
+            await this.run(
+                'INSERT INTO payments (installment_id, customer_id, purchase_id, amount, payment_date, receipt_no, notes, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [
+                    installmentId,
+                    installment.customer_id,
+                    installment.purchase_id,
+                    Math.abs(delta),
+                    this.localToday(),
+                    receiptNo,
+                    delta < 0 ? 'Paid amount edit (decrease)' : 'Paid amount edit (increase)',
+                    delta < 0 ? 'void' : 'payment'
+                ]
+            );
+        }
+        return rec;
     }
 
     static async logicalDeleteSchedule(purchaseId, reason = '') {

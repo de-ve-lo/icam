@@ -215,7 +215,7 @@
     },
 
     payRemaining(rows, { amount, markAsDiscount, paymentDate, customerId, purchaseId, receiptNo }) {
-      if (!(amount > 0)) {
+      if (amount < 0 || (!markAsDiscount && !(amount > 0))) {
         throw new EngineError('InvalidAmount', 'Amount must be greater than 0');
       }
 
@@ -301,9 +301,11 @@
         throw new EngineError('NotFound', 'Installment not found');
       }
 
-      const payments = (ledgerForInstallment || []).filter(
-        (entry) => entry.type === 'payment' && (entry.installment_id === installmentId || entry.installmentId === installmentId)
-      );
+      const payments = (ledgerForInstallment || []).filter((entry) => {
+        const isPayment = entry.type === 'payment' || entry.type == null;
+        const matches = entry.installment_id === installmentId || entry.installmentId === installmentId;
+        return isPayment && matches;
+      });
       if (payments.length === 0) {
         throw new EngineError('NotFound', 'No payment to void');
       }

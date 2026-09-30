@@ -177,49 +177,15 @@ class InstallmentManager {
         }
 
         // Use corrected shortage logic consistent with main display
-        const today = new Date();
         const sortedList = installments.slice().sort((a, b) => a.installment_no - b.installment_no);
-
-        // CORRECTED search results display logic to match main display
         const displayRows = sortedList.map((i) => {
             const currentAmount = Number(i.amount) || 0;
             const originalAmount = Number(i.original_amount) || currentAmount;
-            const paidAmount = Number(i.paid_amount || 0);
-            const isOverdue = new Date(i.due_date) < today;
-
-            // Determine proper status
-            let computedStatus = i.status;
-            if (i.status === 'short') {
-                computedStatus = 'short';
-            } else if (i.status === 'paid' || i.status === 'settled') {
-                computedStatus = i.status;
-            } else if (paidAmount > 0 && paidAmount < currentAmount) {
-                computedStatus = 'partial';
-            } else {
-                computedStatus = i.status || 'pending';
-            }
-
-            // CORRECTED display amounts - same logic as main display
-            let displayDueAmount;
-            let displayRemainingAmount;
-
-            if (computedStatus === 'short') {
-                // Short installments: show 0 in amount column
-                displayDueAmount = 0;
-                displayRemainingAmount = 0;
-            } else if (computedStatus === 'paid' || computedStatus === 'settled') {
-                displayDueAmount = currentAmount > 0 ? currentAmount : originalAmount;
-                displayRemainingAmount = 0;
-            } else {
-                displayDueAmount = currentAmount;
-                displayRemainingAmount = Math.max(0, currentAmount - paidAmount);
-            }
-
             return {
                 ...i,
-                computedStatus,
-                displayDueAmount,
-                displayRemainingAmount,
+                computedStatus: i.status || 'upcoming',
+                displayDueAmount: currentAmount,
+                displayRemainingAmount: Number(i.remaining_balance) || 0,
                 originalAmount,
                 currentAmount
             };
@@ -336,18 +302,14 @@ class InstallmentManager {
         let statusBadgeClass = 'secondary';
         let statusIcon = 'fas fa-question-circle';
 
-        if (this.installments && this.installments.length > 0) {
-            // Use base amounts to prevent double counting in account status calculation
-            const totalUnpaid = this.installments.reduce((sum, i) => {
-                const baseDue = Number(i.amount) || 0;
-                const basePaid = Number(i.paid_amount || 0);
-                const baseRemaining = Math.max(0, baseDue - basePaid);
-                return sum + (i.status !== 'paid' && i.status !== 'settled' ? baseRemaining : 0);
-            }, 0);
+        const headerTotals = this.installments && this.installments.length > 0
+            ? InstallmentEngine.totals(this.installments)
+            : { grandRemaining: 0, credit: 0 };
 
+        if (this.installments && this.installments.length > 0) {
             const allPaidOrSettled = this.installments.every(i => i.status === 'paid' || i.status === 'settled');
 
-            if (allPaidOrSettled || totalUnpaid === 0) {
+            if (allPaidOrSettled || headerTotals.grandRemaining === 0) {
                 accountStatus = 'Closed';
                 statusBadgeClass = 'success';
                 statusIcon = 'fas fa-check-circle';
@@ -382,11 +344,13 @@ class InstallmentManager {
                         <div class="detail-item">
                             <label>Account Status:</label>
                             <span>
-                                <span class="status-badge ${statusBadgeClass}" style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                                <span class="status-badge ${statusBadgeClass}">
                                     <i class="${statusIcon}"></i> ${accountStatus}
                                 </span>
                             </span>
                         </div>
+                        <div class="detail-item"><label>Grand Remaining:</label><span>${Utils.formatCurrency(headerTotals.grandRemaining)}</span></div>
+                        ${headerTotals.credit > 0 ? `<div class="detail-item"><label>Credit:</label><span class="text-success">${Utils.formatCurrency(headerTotals.credit)}</span></div>` : ''}
                     </div>
                 </div>
                 <div class="card-footer" style="display:flex; gap:0.5rem; justify-content:flex-end;">
@@ -424,71 +388,25 @@ class InstallmentManager {
         }
         const isCompleted = purchaseStatus === 'completed';
 
-        // CORRECTED UI rendering logic with proper value shifting display
-        const today = new Date();
         const sortedList = list.slice().sort((a, b) => a.installment_no - b.installment_no);
+        const totals = InstallmentEngine.totals(sortedList);
+        const grandRemaining = totals.grandRemaining;
+        const credit = totals.credit;
 
-        // CORRECTED display logic - show short installments with 0 amounts as per screenshot requirements
         const displayRows = sortedList.map((i) => {
             const currentAmount = Number(i.amount) || 0;
             const originalAmount = Number(i.original_amount) || currentAmount;
-            const paidAmount = Number(i.paid_amount || 0);
-            const isOverdue = new Date(i.due_date) < today;
-
-            // Determine proper status
-            let computedStatus = i.status;
-            if (i.status === 'short') {
-                computedStatus = 'short';
-            } else if (i.status === 'paid' || i.status === 'settled') {
-                computedStatus = i.status;
-            } else if (paidAmount > 0 && paidAmount < currentAmount) {
-                computedStatus = 'partial';
-            } else {
-                computedStatus = i.status || 'pending';
-            }
-
-            // CORRECTED display amounts logic as per your screenshot requirements
-            let displayDueAmount;
-            let displayRemainingAmount;
-
-            if (computedStatus === 'short') {
-                // Short installments: AMOUNT column shows 0, REMAINING shows 0 (as marked in screenshot)
-                displayDueAmount = 0;
-                displayRemainingAmount = 0;
-            } else if (computedStatus === 'paid' || computedStatus === 'settled') {
-                // Paid installments: show what they were and 0 remaining
-                displayDueAmount = currentAmount > 0 ? currentAmount : originalAmount;
-                displayRemainingAmount = 0;
-            } else {
-                // Active installments: show current amount (includes shifted values) and remaining
-                displayDueAmount = currentAmount;
-                displayRemainingAmount = Math.max(0, currentAmount - paidAmount);
-            }
-
+            const computedStatus = i.status || 'upcoming';
             return {
                 ...i,
                 computedStatus,
-                displayDueAmount,
-                displayRemainingAmount,
+                displayDueAmount: currentAmount,
+                displayRemainingAmount: Number(i.remaining_balance) || 0,
                 originalAmount,
-                currentAmount // Keep track of current amount for calculations
+                currentAmount
             };
         });
 
-        // Calculate TRUE total unpaid using original amounts - prevents double counting
-        const totalUnpaid = sortedList.reduce((sum, i) => {
-            if (i.status === 'paid' || i.status === 'settled') {
-                return sum; // Don't count paid installments
-            }
-
-            const originalAmount = Number(i.original_amount) || Number(i.amount) || 0;
-            const paidAmount = Number(i.paid_amount || 0);
-            const remaining = Math.max(0, originalAmount - paidAmount);
-            return sum + remaining;
-        }, 0);
-
-        // If everything is short, there is no upcoming installment to carry the shortage visually.
-        // Show a clear banner with the accumulated shortage to guide the user.
         const allShort = displayRows.every(r => r.computedStatus === 'short');
 
         const table = `
@@ -555,14 +473,16 @@ class InstallmentManager {
                     </tbody>
                 </table>
             </div>
-            ${allShort && totalUnpaid > 0 ? `
-                <div class=\"alert info\" style=\"margin-top:10px; padding:12px; background:#e7f3ff; border-left:4px solid #007bff; border-radius:4px;\">\n                    <strong><i class=\"fas fa-info-circle\"></i> All installments are overdue (short).</strong>\n                    The accumulated shortage of <strong>${Utils.formatCurrency(totalUnpaid)}</strong> will be collected at the next payment using the \"Pay Remaining/Short Balance\" option below.
+            ${allShort && grandRemaining > 0 ? `
+                <div class="alert alert-info">
+                    <strong><i class="fas fa-info-circle"></i> All installments are overdue (short).</strong>
+                    The accumulated shortage of <strong>${Utils.formatCurrency(grandRemaining)}</strong> will be collected at the next payment using the "Pay Remaining/Short Balance" option below.
                 </div>
             ` : ''}
-            ${totalUnpaid > 0 && !isCompleted ? `
-                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
-                    <button class="btn btn-warning" onclick="app.installments.openRemainingModal(${displayRows[displayRows.length - 1].installment_id}, ${totalUnpaid})">
-                        <i class="fas fa-exclamation-circle"></i> Pay Remaining/Short Balance: ${Utils.formatCurrency(totalUnpaid)}
+            ${grandRemaining > 0 && !isCompleted ? `
+                <div class="installment-actions-row">
+                    <button class="btn btn-warning" onclick="app.installments.openRemainingModal(${displayRows[displayRows.length - 1].installment_id}, ${grandRemaining})">
+                        <i class="fas fa-exclamation-circle"></i> Pay Remaining/Short Balance: ${Utils.formatCurrency(grandRemaining)}
                     </button>
                     <button class="btn btn-secondary" onclick="app.installments.openPenaltyModal(${displayRows[displayRows.length - 1].purchase_id})">
                         <i class="fas fa-plus"></i> Add Penalty/Profit
@@ -603,7 +523,7 @@ class InstallmentManager {
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Payment Date</label>
-                                <input type="date" name="payment_date" class="form-input" value="${new Date().toISOString().slice(0, 10)}">
+                                <input type="date" name="payment_date" class="form-input" value="${Utils.toLocalDateString(new Date())}">
                                 <small class="form-hint">Date when payment was actually made</small>
                             </div>
                         </form>
@@ -643,7 +563,7 @@ class InstallmentManager {
 
             let result;
             // Use standard payInstallment which now handles reconciliation and distribution (via value shifting) automatically
-            result = await Database.payInstallment(installmentId, amount);
+            result = await Database.payInstallment(installmentId, amount, paymentDate);
 
             // Check for overpayment/excess info from the result if implemented
             const excessMsg = result.overpayment > 0 ? ` (Includes overpayment of ${Utils.formatCurrency(result.overpayment)})` : '';
@@ -655,6 +575,8 @@ class InstallmentManager {
             if (this.currentCustomer) {
                 await Database.reconcileShortagesForCustomer(this.currentCustomer.id);
                 const installments = await Database.getCustomerInstallments(this.currentCustomer.id);
+                this.installments = installments;
+                document.getElementById('customer-details').innerHTML = this.renderCustomerInfo(this.currentCustomer);
                 this.renderInstallments(installments);
             }
         } catch (error) {
@@ -955,15 +877,18 @@ class InstallmentManager {
             // Fetch installment to compute delta
             const inst = this.installments.find(i => Number(i.installment_id) === Number(installmentId));
             const currentPaid = inst.paid_amount || 0;
-            const delta = amount - currentPaid;
-            if (delta !== 0) {
-                await Database.payInstallment(installmentId, delta);
+            if (amount < currentPaid) {
+                await Database.setInstallmentPaidAmount(installmentId, amount);
+            } else if (amount > currentPaid) {
+                await Database.payInstallment(installmentId, amount - currentPaid);
             }
             app.showNotification('Payment updated successfully', 'success');
             app.closeModal();
             if (this.currentCustomer) {
                 await Database.reconcileShortagesForCustomer(this.currentCustomer.id);
                 const installments = await Database.getCustomerInstallments(this.currentCustomer.id);
+                this.installments = installments;
+                document.getElementById('customer-details').innerHTML = this.renderCustomerInfo(this.currentCustomer);
                 this.renderInstallments(installments);
             }
         } catch (e) {
@@ -1199,9 +1124,10 @@ class InstallmentManager {
             app.showNotification('Payment voided successfully', 'success');
             app.closeModal();
             if (this.currentCustomer) {
-                // Reconcile and refresh
                 await Database.reconcileShortagesForCustomer(this.currentCustomer.id);
                 const installments = await Database.getCustomerInstallments(this.currentCustomer.id);
+                this.installments = installments;
+                document.getElementById('customer-details').innerHTML = this.renderCustomerInfo(this.currentCustomer);
                 this.renderInstallments(installments);
             }
         } catch (e) {

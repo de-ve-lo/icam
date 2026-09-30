@@ -209,6 +209,13 @@
     border-color: #fca5a5;
 }
 
+.installment-actions-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 /* Card Variations */
 .card {
     background: var(--card-background);
