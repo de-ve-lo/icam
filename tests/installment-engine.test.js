@@ -27,3 +27,44 @@ describe('createSchedule', () => {
     assert.equal(sum, 88000);
   });
 });
+
+function fourBy10k() {
+  return [1, 2, 3, 4].map((n) => ({
+    id: n, purchase_id: 1, installment_no: n,
+    due_date: `2026-0${n}-01`, original_amount: 10000, paid_amount: 0,
+    amount: 10000, remaining_balance: 10000, status: 'upcoming'
+  }));
+}
+
+describe('reconcile', () => {
+  it('scenario 1: first overdue unpaid shifts 10k to #2', () => {
+    const { rows, grandRemaining } = InstallmentEngine.reconcile(fourBy10k(), '2026-01-15');
+    assert.equal(rows[0].status, 'short');
+    assert.equal(rows[0].amount, 0);
+    assert.equal(rows[0].remaining_balance, 0);
+    assert.equal(rows[1].amount, 20000);
+    assert.equal(rows[1].remaining_balance, 20000);
+    assert.equal(grandRemaining, 40000);
+    assert.equal(rows[0].original_amount, 10000);
+  });
+
+  it('scenario 6: two overdue unpaid triples #3', () => {
+    const { rows, grandRemaining } = InstallmentEngine.reconcile(fourBy10k(), '2026-02-15');
+    assert.equal(rows[0].status, 'short');
+    assert.equal(rows[1].status, 'short');
+    assert.equal(rows[2].amount, 30000);
+    assert.equal(grandRemaining, 40000);
+  });
+
+  it('scenario 7: all overdue, grand remains 40000', () => {
+    const { rows, grandRemaining } = InstallmentEngine.reconcile(fourBy10k(), '2026-05-01');
+    assert.ok(rows.every((r) => r.status === 'short'));
+    assert.ok(rows.every((r) => r.remaining_balance === 0));
+    assert.equal(grandRemaining, 40000);
+  });
+
+  it('never changes original_amount', () => {
+    const { rows } = InstallmentEngine.reconcile(fourBy10k(), '2026-02-15');
+    assert.ok(rows.every((r) => r.original_amount === 10000));
+  });
+});

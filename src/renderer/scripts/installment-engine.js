@@ -87,6 +87,58 @@
           installmentMonths: months
         }
       };
+    },
+
+    totals(rows) {
+      const list = rows || [];
+      let originalSum = 0;
+      let paidSum = 0;
+      for (const row of list) {
+        originalSum += Number(row.original_amount) || 0;
+        paidSum += Number(row.paid_amount) || 0;
+      }
+      const net = originalSum - paidSum;
+      return {
+        net,
+        grandRemaining: Math.max(0, net),
+        credit: Math.max(0, -net)
+      };
+    },
+
+    reconcile(rows, todayLocalDateString) {
+      const copies = (rows || []).map((row) => ({ ...row }));
+      copies.sort((a, b) => a.installment_no - b.installment_no);
+
+      let runningShortage = 0;
+
+      for (const row of copies) {
+        const original = Number(row.original_amount) || 0;
+        const paid = Number(row.paid_amount) || 0;
+        const isOverdue = row.due_date < todayLocalDateString;
+
+        if (isOverdue) {
+          const unpaid = original + runningShortage - paid;
+          row.status = 'short';
+          row.amount = 0;
+          row.remaining_balance = 0;
+          runningShortage = unpaid;
+        } else {
+          const displayDue = original + runningShortage;
+          row.amount = displayDue;
+          row.remaining_balance = Math.max(0, displayDue - paid);
+          if (paid > 0 && row.remaining_balance > 0) {
+            row.status = 'partial';
+          } else if (row.remaining_balance <= 0) {
+            row.status = 'paid';
+          } else {
+            row.status = 'upcoming';
+          }
+          runningShortage = 0;
+        }
+      }
+
+      const { grandRemaining, credit, net } = this.totals(copies);
+      return { rows: copies, grandRemaining, credit, net };
     }
   };
 
