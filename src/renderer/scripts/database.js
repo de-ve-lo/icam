@@ -89,10 +89,10 @@ class Database {
     // Stock
     static async getStock() {
         return await this.query(`
-            SELECT s.*, p.item_name, sup.supplier_name 
-            FROM stock s 
-            JOIN products p ON s.product_id = p.id 
-            JOIN suppliers sup ON s.supplier_id = sup.id 
+            SELECT s.*, p.item_name, p.category, sup.supplier_name
+            FROM stock s
+            JOIN products p ON s.product_id = p.id
+            JOIN suppliers sup ON s.supplier_id = sup.id
             ORDER BY s.created_at DESC
         `);
     }
@@ -183,10 +183,25 @@ class Database {
             purchase.monthly_installment, purchase.start_date]
         );
 
-        // Mark stock as sold
-        await this.run('UPDATE stock SET is_sold = 1 WHERE id = ?', [purchase.stock_id]);
+        await this.markStockSold(purchase.stock_id, purchase.quantity || 1);
 
         return result;
+    }
+
+    static async markStockSold(stockId, qty = 1) {
+        const row = await this.get(`
+            SELECT s.*, p.category FROM stock s JOIN products p ON s.product_id = p.id WHERE s.id = ?
+        `, [stockId]);
+        if (!row) return;
+        if (row.category === 'misc') {
+            const nextQty = Math.max(0, (Number(row.quantity) || 1) - qty);
+            await this.run(
+                'UPDATE stock SET quantity = ?, is_sold = ? WHERE id = ?',
+                [nextQty, nextQty <= 0 ? 1 : 0, stockId]
+            );
+        } else {
+            await this.run('UPDATE stock SET is_sold = 1 WHERE id = ?', [stockId]);
+        }
     }
 
     // CORRECTED Calculate installment amounts with proper rounding - REMAINDER TO LAST INSTALLMENT
@@ -272,8 +287,12 @@ class Database {
                 c.account_no,
                 c.cnic_no,
                 p.item_name,
+                p.category,
                 s.engine_no,
-                s.chassis_no
+                s.chassis_no,
+                s.imei,
+                s.serial_no,
+                s.quantity
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
@@ -965,8 +984,12 @@ class Database {
                 c.customer_name,
                 c.account_no,
                 p.item_name,
+                p.category,
                 s.engine_no,
-                s.chassis_no
+                s.chassis_no,
+                s.imei,
+                s.serial_no,
+                s.quantity
             FROM cash_sales cs
             LEFT JOIN customers c ON cs.customer_id = c.id
             JOIN stock s ON cs.stock_id = s.id
@@ -977,10 +1000,10 @@ class Database {
 
     static async getAvailableStock() {
         return await this.safeQuery(`
-            SELECT s.*, p.item_name, p.current_price
+            SELECT s.*, p.item_name, p.current_price, p.category
             FROM stock s
             JOIN products p ON s.product_id = p.id
-            WHERE s.is_sold = 0
+            WHERE s.is_sold = 0 AND (p.category != 'misc' OR COALESCE(s.quantity, 1) > 0)
             ORDER BY s.created_at DESC
         `, [], []);
     }
@@ -993,8 +1016,7 @@ class Database {
             cashSale.received_price, cashSale.due_amount, cashSale.payment_status, cashSale.notes]
         );
 
-        // Mark stock as sold
-        await this.run('UPDATE stock SET is_sold = 1 WHERE id = ?', [cashSale.stock_id]);
+        await this.markStockSold(cashSale.stock_id, cashSale.quantity || 1);
 
         return result;
     }

@@ -63,6 +63,7 @@ class ProductManager {
                         <strong>${Utils.capitalizeWords(product.item_name)}</strong>
                     </div>
                 </td>
+                <td>${Utils.capitalizeWords(product.category || 'bike')}</td>
                 <td>
                     <span class="currency">${Utils.formatCurrency(product.current_price)}</span>
                 </td>
@@ -281,6 +282,15 @@ class ProductManager {
                     <div class="modal-body">
                         <form id="product-form" class="form-grid">
                             <div class="form-group">
+                                <label class="form-label required">Category</label>
+                                <select name="category" class="form-input" required>
+                                    <option value="bike">Bike</option>
+                                    <option value="mobile">Mobile</option>
+                                    <option value="car">Car</option>
+                                    <option value="misc">Misc</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label required">Product Name</label>
                                 <input type="text" name="item_name" class="form-input" required 
                                     placeholder="e.g., Honda CB 150F">
@@ -345,6 +355,15 @@ class ProductManager {
                     </div>
                     <div class="modal-body">
                         <form id="product-form" class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label required">Category</label>
+                                <select name="category" class="form-input" required>
+                                    <option value="bike" ${(product.category || 'bike') === 'bike' ? 'selected' : ''}>Bike</option>
+                                    <option value="mobile" ${product.category === 'mobile' ? 'selected' : ''}>Mobile</option>
+                                    <option value="car" ${product.category === 'car' ? 'selected' : ''}>Car</option>
+                                    <option value="misc" ${product.category === 'misc' ? 'selected' : ''}>Misc</option>
+                                </select>
+                            </div>
                             <div class="form-group">
                                 <label class="form-label required">Product Name</label>
                                 <input type="text" name="item_name" class="form-input" required 
@@ -432,7 +451,9 @@ class ProductManager {
         const product = {
             item_name: formData.get('item_name').trim(),
             current_price: parseFloat(formData.get('current_price')),
-            purchase_price: parseFloat(formData.get('purchase_price'))
+            purchase_price: parseFloat(formData.get('purchase_price')),
+            category: formData.get('category') || 'bike',
+            unit: 'piece'
         };
 
         // Validation

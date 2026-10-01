@@ -13,8 +13,8 @@ class InstallmentCalculator {
         try {
             this.products = await Database.getProducts();
             this.suppliers = await Database.getSuppliers();
-            this.customers = await Database.getCustomersWithoutActivePurchase();
-            this.availableStock = await Database.query('SELECT s.*, p.item_name FROM stock s JOIN products p ON s.product_id = p.id WHERE s.is_sold = 0');
+            this.customers = await Database.getCustomers();
+            this.availableStock = await Database.getAvailableStock();
         } catch (error) {
             console.error('Error initializing calculator:', error);
         }
@@ -54,18 +54,17 @@ class InstallmentCalculator {
                                             <label class="form-label required">Select Stock Item</label>
                                             <select name="stock_id" class="form-input" required onchange="calculator.updateProductInfo(this.value)">
                                                 <option value="">Choose Stock Item</option>
-                                                ${this.availableStock.map(s => `<option value="${s.id}" data-product-id="${s.product_id}" data-supplier-id="${s.supplier_id}">${s.item_name} - ${s.engine_no}</option>`).join('')}
+                                                 ${this.availableStock.map(s => {
+                                                     const ident = Utils.stockIdentifier(s);
+                                                     return `<option value="${s.id}" data-product-id="${s.product_id}" data-supplier-id="${s.supplier_id}">${s.item_name} - ${ident.label}: ${ident.value}</option>`;
+                                                 }).join('')}
                                             </select>
                                         </div>
                                         <div id="product-info" class="product-info-display" style="display: none;">
                                             <div class="info-grid">
                                                 <div class="info-item">
-                                                    <label>Engine No:</label>
-                                                    <span id="selected-engine-no">-</span>
-                                                </div>
-                                                <div class="info-item">
-                                                    <label>Chassis No:</label>
-                                                    <span id="selected-chassis-no">-</span>
+                                                    <label id="selected-ident-label">Identifier:</label>
+                                                    <span id="selected-ident-value">-</span>
                                                 </div>
                                                 <div class="info-item">
                                                     <label>Purchase Price:</label>
@@ -178,8 +177,9 @@ class InstallmentCalculator {
         if (!product) return;
 
         // Update product information display
-        document.getElementById('selected-engine-no').textContent = stockItem.engine_no;
-        document.getElementById('selected-chassis-no').textContent = stockItem.chassis_no;
+        const ident = Utils.stockIdentifier(stockItem);
+        document.getElementById('selected-ident-label').textContent = ident.label + ':';
+        document.getElementById('selected-ident-value').textContent = ident.value;
         document.getElementById('selected-purchase-price').textContent = Utils.formatCurrency(product.purchase_price);
         document.getElementById('product-info').style.display = 'block';
 
@@ -508,8 +508,7 @@ class InstallmentCalculator {
                         <h3>Product Information</h3>
                         <table class="info-table">
                             <tr><td>Product</td><td>${Utils.capitalizeWords(product.item_name)}</td></tr>
-                            <tr><td>Engine No</td><td>${stockItem.engine_no}</td></tr>
-                            <tr><td>Chassis No</td><td>${stockItem.chassis_no}</td></tr>
+                            <tr><td>${Utils.stockIdentifier(stockItem).label}</td><td>${Utils.stockIdentifier(stockItem).value}</td></tr>
                             <tr><td>Stock No</td><td>${stockItem.stock_no}</td></tr>
                         </table>
                     </div>
@@ -619,13 +618,6 @@ class InstallmentCalculator {
 
         try {
             app.showLoading();
-
-            // Enforce single active plan per customer
-            const alreadyHasPlan = await Database.hasActivePurchase(customerId);
-            if (alreadyHasPlan) {
-                app.showNotification('This customer already has an active installment plan and cannot be assigned another.', 'error');
-                return;
-            }
 
             const { summary, schedule, stockItem, product } = this.currentCalculation;
 

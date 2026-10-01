@@ -56,7 +56,7 @@ class CashSalesManager {
                             <th>Date</th>
                             <th>Customer</th>
                             <th>Item</th>
-                            <th>Engine No</th>
+                            <th>Identifier</th>
                             <th>Agreed Price</th>
                             <th>Received</th>
                             <th>Due Amount</th>
@@ -70,7 +70,7 @@ class CashSalesManager {
                                 <td>${Utils.formatDate(sale.sale_date)}</td>
                                 <td>${sale.customer_name || 'Walk-in Customer'}</td>
                                 <td>${sale.item_name}</td>
-                                <td>${sale.engine_no}</td>
+                                <td>${Utils.stockIdentifier(sale).value}</td>
                                 <td>${Utils.formatCurrency(sale.agreed_price)}</td>
                                 <td>${Utils.formatCurrency(sale.received_price)}</td>
                                 <td>${Utils.formatCurrency(sale.due_amount || 0)}</td>
@@ -132,7 +132,7 @@ class CashSalesManager {
                                 <select name="stock_id" class="form-input" required onchange="app.cashSales.onStockSelected(this)">
                                     <option value="">Select Item</option>
                                     ${this.availableStock.map(item => `
-                                        <option value="${item.id}" data-price="${item.current_price}">${item.item_name} - Engine: ${item.engine_no}</option>
+                                         <option value="${item.id}" data-price="${item.current_price}">${item.item_name} - ${Utils.stockIdentifier(item).label}: ${Utils.stockIdentifier(item).value}</option>
                                     `).join('')}
                                 </select>
                             </div>
@@ -255,8 +255,7 @@ class CashSalesManager {
                     <table class="invoice-details">
                         <tr><th>Customer</th><td>${sale.customer_name || 'Walk-in Customer'}</td></tr>
                         <tr><th>Item</th><td>${sale.item_name}</td></tr>
-                        <tr><th>Engine No</th><td>${sale.engine_no}</td></tr>
-                        <tr><th>Chassis No</th><td>${sale.chassis_no}</td></tr>
+                        <tr><th>${Utils.stockIdentifier(sale).label}</th><td>${Utils.stockIdentifier(sale).value}</td></tr>
                         <tr><th>Agreed Price</th><td>${Utils.formatCurrency(sale.agreed_price)}</td></tr>
                         <tr><th>Amount Received</th><td>${Utils.formatCurrency(sale.received_price)}</td></tr>
                         ${sale.due_amount > 0 ? `<tr><th style="color: red;">Due Amount</th><td style="color: red;">${Utils.formatCurrency(sale.due_amount)}</td></tr>` : ''}

@@ -39,8 +39,7 @@ class StockManager {
                 <td>${item.stock_no}</td>
                 <td>${Utils.capitalizeWords(item.item_name)}</td>
                 <td>${Utils.capitalizeWords(item.supplier_name)}</td>
-                <td>${item.engine_no}</td>
-                <td>${item.chassis_no}</td>
+                <td>${Utils.stockIdentifier(item).label}: ${Utils.stockIdentifier(item).value}</td>
                 <td>${Utils.formatDate(item.stock_date)}</td>
                 <td>
                     <span class="status-badge ${item.is_sold ? 'status-sold' : 'status-available'}">
@@ -77,7 +76,7 @@ class StockManager {
                             <div class="input-group">
                                 <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #6c757d;"></i>
                                 <input type="text" id="stock-search" 
-                                    placeholder="Search by stock no, product, supplier, engine/chassis..." 
+                                    placeholder="Search by stock no, product, supplier, identifier..." 
                                     class="form-input" style="padding-left: 40px;">
                             </div>
                         </div>
@@ -153,9 +152,8 @@ class StockManager {
             const stockNo = row.children[0].textContent.toLowerCase();
             const productName = row.children[1].textContent.toLowerCase();
             const supplierName = row.children[2].textContent.toLowerCase();
-            const engineNo = row.children[3].textContent.toLowerCase();
-            const chassisNo = row.children[4].textContent.toLowerCase();
-            const dateText = row.children[5].textContent;
+            const identifier = row.children[3].textContent.toLowerCase();
+            const dateText = row.children[4].textContent;
             const status = row.getAttribute('data-status');
             const createdDate = new Date(row.getAttribute('data-created') || dateText);
             
@@ -164,8 +162,7 @@ class StockManager {
                 stockNo.includes(searchTerm) ||
                 productName.includes(searchTerm) ||
                 supplierName.includes(searchTerm) ||
-                engineNo.includes(searchTerm) ||
-                chassisNo.includes(searchTerm);
+                identifier.includes(searchTerm);
             
             // Status filter
             const statusMatches = statusFilter === 'all' || status === statusFilter;
@@ -224,14 +221,7 @@ class StockManager {
                                     ${this.suppliers.map(s => `<option value="${s.id}">${Utils.capitalizeWords(s.supplier_name)}</option>`).join('')}
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label required">Engine No</label>
-                                <input type="text" name="engine_no" class="form-input" required>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label required">Chassis No</label>
-                                <input type="text" name="chassis_no" class="form-input" required>
-                            </div>
+                            <div id="stock-category-fields"></div>
                             <div class="form-group">
                                 <label class="form-label required">Stock Date</label>
                                 <input type="date" name="stock_date" class="form-input" required value="${Utils.formatDate(new Date(), 'YYYY-MM-DD')}">
@@ -253,6 +243,7 @@ class StockManager {
         `;
 
         app.showModal(modalHtml);
+        this.bindCategoryFields();
     }
 
     showEditModal(item) {
@@ -277,14 +268,7 @@ class StockManager {
                                     ${this.suppliers.map(s => `<option value="${s.id}" ${s.id === item.supplier_id ? 'selected' : ''}>${Utils.capitalizeWords(s.supplier_name)}</option>`).join('')}
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label required">Engine No</label>
-                                <input type="text" name="engine_no" class="form-input" required value="${item.engine_no}">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label required">Chassis No</label>
-                                <input type="text" name="chassis_no" class="form-input" required value="${item.chassis_no}">
-                            </div>
+                            <div id="stock-category-fields"></div>
                             <div class="form-group">
                                 <label class="form-label required">Stock Date</label>
                                 <input type="date" name="stock_date" class="form-input" required value="${Utils.formatDate(item.stock_date, 'YYYY-MM-DD')}">
@@ -306,6 +290,55 @@ class StockManager {
         `;
 
         app.showModal(modalHtml);
+        this.bindCategoryFields(item);
+    }
+
+    categoryFieldsHtml(category, item = {}) {
+        if (category === 'mobile') {
+            return `
+                <div class="form-group">
+                    <label class="form-label required">IMEI</label>
+                    <input type="text" name="imei" class="form-input" required value="${item.imei || ''}">
+                </div>`;
+        }
+        if (category === 'misc') {
+            return `
+                <div class="form-group">
+                    <label class="form-label">Serial No</label>
+                    <input type="text" name="serial_no" class="form-input" value="${item.serial_no || ''}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label required">Quantity</label>
+                    <input type="number" name="quantity" class="form-input" required min="1" value="${item.quantity != null ? item.quantity : 1}">
+                </div>`;
+        }
+        return `
+            <div class="form-group">
+                <label class="form-label required">Engine No</label>
+                <input type="text" name="engine_no" class="form-input" required value="${item.engine_no || ''}">
+            </div>
+            <div class="form-group">
+                <label class="form-label required">Chassis No</label>
+                <input type="text" name="chassis_no" class="form-input" required value="${item.chassis_no || ''}">
+            </div>
+            ${category === 'car' ? `
+            <div class="form-group">
+                <label class="form-label">Reg No</label>
+                <input type="text" name="reg_no" class="form-input" value="${item.reg_no || ''}">
+            </div>` : ''}`;
+    }
+
+    bindCategoryFields(item = null) {
+        const productSelect = document.querySelector('#stock-form [name="product_id"]');
+        const fields = document.getElementById('stock-category-fields');
+        if (!productSelect || !fields) return;
+        const render = () => {
+            const product = this.products.find(p => String(p.id) === String(productSelect.value));
+            const category = product ? (product.category || 'bike') : 'bike';
+            fields.innerHTML = this.categoryFieldsHtml(category, item || {});
+        };
+        productSelect.addEventListener('change', render);
+        render();
     }
 
     async save(existingId = null) {
@@ -313,11 +346,17 @@ class StockManager {
         if (!app.validateForm(form)) return;
 
         const formData = new FormData(form);
+        const product = this.products.find(p => String(p.id) === String(formData.get('product_id')));
+        const category = product ? (product.category || 'bike') : 'bike';
         const stock = {
             product_id: parseInt(formData.get('product_id')),
             supplier_id: parseInt(formData.get('supplier_id')),
-            engine_no: formData.get('engine_no').trim(),
-            chassis_no: formData.get('chassis_no').trim(),
+            engine_no: (formData.get('engine_no') || '').trim() || null,
+            chassis_no: (formData.get('chassis_no') || '').trim() || null,
+            imei: (formData.get('imei') || '').trim() || null,
+            reg_no: (formData.get('reg_no') || '').trim() || null,
+            serial_no: (formData.get('serial_no') || '').trim() || null,
+            quantity: parseInt(formData.get('quantity') || '1', 10) || 1,
             stock_date: formData.get('stock_date'),
             stock_no: formData.get('stock_no').trim()
         };
@@ -325,32 +364,50 @@ class StockManager {
         try {
             app.showLoading();
 
-            // Check for duplicates before saving
-            const duplicateEngine = await Database.get(
-                'SELECT id FROM stock WHERE engine_no = ? AND id != ?',
-                [stock.engine_no, existingId || 0]
-            );
-            
-            const duplicateChassis = await Database.get(
-                'SELECT id FROM stock WHERE chassis_no = ? AND id != ?',
-                [stock.chassis_no, existingId || 0]
-            );
-
-            if (duplicateEngine) {
-                app.showNotification(`Engine number "${stock.engine_no}" already exists in stock!`, 'error');
-                return;
-            }
-
-            if (duplicateChassis) {
-                app.showNotification(`Chassis number "${stock.chassis_no}" already exists in stock!`, 'error');
+            if (category === 'bike' || category === 'car') {
+                if (!stock.engine_no || !stock.chassis_no) {
+                    app.showNotification('Engine and chassis numbers are required', 'error');
+                    return;
+                }
+                const duplicateEngine = await Database.get(
+                    'SELECT id FROM stock WHERE engine_no = ? AND engine_no IS NOT NULL AND id != ?',
+                    [stock.engine_no, existingId || 0]
+                );
+                const duplicateChassis = await Database.get(
+                    'SELECT id FROM stock WHERE chassis_no = ? AND chassis_no IS NOT NULL AND id != ?',
+                    [stock.chassis_no, existingId || 0]
+                );
+                if (duplicateEngine) {
+                    app.showNotification(`Engine number "${stock.engine_no}" already exists in stock!`, 'error');
+                    return;
+                }
+                if (duplicateChassis) {
+                    app.showNotification(`Chassis number "${stock.chassis_no}" already exists in stock!`, 'error');
+                    return;
+                }
+            } else if (category === 'mobile') {
+                if (!stock.imei) {
+                    app.showNotification('IMEI is required', 'error');
+                    return;
+                }
+                const duplicateImei = await Database.get(
+                    'SELECT id FROM stock WHERE imei = ? AND imei IS NOT NULL AND id != ?',
+                    [stock.imei, existingId || 0]
+                );
+                if (duplicateImei) {
+                    app.showNotification(`IMEI "${stock.imei}" already exists in stock!`, 'error');
+                    return;
+                }
+            } else if (stock.quantity < 1) {
+                app.showNotification('Quantity must be at least 1', 'error');
                 return;
             }
 
             if (existingId) {
                 await Database.run(`
-                    UPDATE stock SET product_id = ?, supplier_id = ?, engine_no = ?, chassis_no = ?, stock_date = ?, stock_no = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE stock SET product_id = ?, supplier_id = ?, engine_no = ?, chassis_no = ?, imei = ?, reg_no = ?, serial_no = ?, quantity = ?, stock_date = ?, stock_no = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                `, [stock.product_id, stock.supplier_id, stock.engine_no, stock.chassis_no, stock.stock_date, stock.stock_no, existingId]);
+                `, [stock.product_id, stock.supplier_id, stock.engine_no, stock.chassis_no, stock.imei, stock.reg_no, stock.serial_no, stock.quantity, stock.stock_date, stock.stock_no, existingId]);
                 app.showNotification('Stock item updated successfully!', 'success');
             } else {
                 await Database.addStock(stock);

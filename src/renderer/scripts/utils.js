@@ -83,6 +83,20 @@ class Utils {
     static roundTo(num, decimals = 2) {
         return Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
     }
+
+    static stockIdentifier(row) {
+        const category = row.category || row.product_category || 'bike';
+        if (category === 'mobile') {
+            return { label: 'IMEI', value: row.imei || '-' };
+        }
+        if (category === 'misc') {
+            if (row.serial_no) return { label: 'Serial', value: row.serial_no };
+            return { label: 'Qty', value: String(row.quantity != null ? row.quantity : 1) };
+        }
+        const engine = row.engine_no || '-';
+        const chassis = row.chassis_no || '-';
+        return { label: 'Engine / Chassis', value: `${engine} / ${chassis}` };
+    }
     
     // Validation utilities
     static isValidCNIC(cnic) {

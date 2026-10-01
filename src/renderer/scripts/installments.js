@@ -615,7 +615,7 @@ class InstallmentManager {
             }
             // Get purchase details
             purchase = purchaseId ? await Database.get(
-                `SELECT cp.*, s.engine_no, s.chassis_no, p.item_name
+                `SELECT cp.*, s.engine_no, s.chassis_no, s.imei, s.serial_no, s.quantity, p.item_name, p.category
                  FROM customer_purchases cp
                  JOIN stock s ON cp.stock_id = s.id
                  JOIN products p ON s.product_id = p.id
@@ -657,8 +657,7 @@ class InstallmentManager {
                     <div class="purchase-details">
                         <h3 style="margin-top: 0;">Purchase Details</h3>
                         <p><strong>Item:</strong> ${purchase.item_name || '-'} &nbsp;&nbsp; 
-                           <strong>Engine No:</strong> ${purchase.engine_no || '-'} &nbsp;&nbsp; 
-                           <strong>Chassis No:</strong> ${purchase.chassis_no || '-'}</p>
+                           <strong>${Utils.stockIdentifier(purchase).label}:</strong> ${Utils.stockIdentifier(purchase).value}</p>
                         <p><strong>Sale Price:</strong> ${Utils.formatCurrency(purchase.sale_price || 0)} &nbsp;&nbsp;
                            <strong>Advance Received:</strong> ${Utils.formatCurrency(purchase.advance_received || 0)} &nbsp;&nbsp;
                            <strong>Total Amount:</strong> ${Utils.formatCurrency(purchase.total_amount || 0)}</p>
@@ -773,8 +772,7 @@ class InstallmentManager {
                         ${totalDiscount > 0 ? `<tr><th>Discount Applied</th><td>${Utils.formatCurrency(totalDiscount)}</td></tr>` : ''}
                         ${totalDiscount > 0 ? `<tr><th><strong>Total Credited</strong></th><td><strong>${Utils.formatCurrency(totalTransaction)}</strong></td></tr>` : ''}
                         <tr><th>Product</th><td>${inst.item_name || '-'}</td></tr>
-                        <tr><th>Engine No</th><td>${inst.engine_no || '-'}</td></tr>
-                        <tr><th>Chassis No</th><td>${inst.chassis_no || '-'}</td></tr>
+                        <tr><th>${Utils.stockIdentifier(inst).label}</th><td>${Utils.stockIdentifier(inst).value}</td></tr>
                     </table>
                     
                     ${isDistributedPayment ? `
