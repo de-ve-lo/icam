@@ -10,13 +10,40 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
-    <div id="app">
+    <div id="login-screen" class="auth-screen">
+        <form id="login-form" class="auth-card">
+            <h2>Sign in</h2>
+            <div class="form-group">
+                <label class="form-label" for="login-username">Username</label>
+                <input id="login-username" class="form-input" name="username" autocomplete="username" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="login-password">Password</label>
+                <input id="login-password" class="form-input" type="password" name="password" autocomplete="current-password" required>
+            </div>
+            <p id="login-error" class="text-danger"></p>
+            <button class="btn btn-primary" type="submit">Login</button>
+        </form>
+    </div>
+    <div id="lock-screen" class="auth-screen hidden">
+        <form id="lock-form" class="auth-card">
+            <h2>Locked</h2>
+            <p>Signed in as <strong id="lock-username"></strong></p>
+            <div class="form-group">
+                <label class="form-label" for="lock-password">Password</label>
+                <input id="lock-password" class="form-input" type="password" name="password" required>
+            </div>
+            <p id="lock-error" class="text-danger"></p>
+            <button class="btn btn-primary" type="submit">Unlock</button>
+        </form>
+    </div>
+    <div id="app" class="hidden">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
                 <div class="logo">
                     <i class="fas fa-calculator"></i>
-                    <h1>Installment Management System</h1>
+                    <h1 id="header-shop-name">Installment Management System</h1>
                 </div>
                     <div class="header-actions">
                         <button id="calculator-btn" class="btn btn-primary" title="Open Installment Calculator">
@@ -27,14 +54,15 @@
                             <i class="fas fa-download"></i>
                             Backup
                         </button>
-                        <button id="system-reset-btn" class="btn btn-danger" title="Reset Entire System" style="margin-left: 8px;">
+                        <button id="system-reset-btn" class="btn btn-danger" data-admin-only title="Reset Entire System">
                             <i class="fas fa-trash-restore"></i>
                             Reset System
                         </button>
                         <div class="user-info">
                             <i class="fas fa-user"></i>
-                            <span>Admin</span>
+                            <span id="header-user-name">Guest</span>
                         </div>
+                        <button id="logout-btn" class="btn btn-secondary" type="button">Logout</button>
                     </div>
             </div>
         </header>
@@ -106,6 +134,18 @@
                     <a href="#reports" class="nav-link" data-section="reports">
                         <i class="fas fa-chart-bar"></i>
                         <span>Reports</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-admin-only>
+                    <a href="#users" class="nav-link" data-section="users">
+                        <i class="fas fa-user-shield"></i>
+                        <span>Users</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-admin-only>
+                    <a href="#settings" class="nav-link" data-section="settings">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
                     </a>
                 </li>
             </ul>
@@ -492,6 +532,73 @@
                 </div>
                 <div id="reports-output" class="reports-output"></div>
             </section>
+
+            <section id="users-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-user-shield"></i> Users</h2>
+                </div>
+                <form id="create-user-form" class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Username</label>
+                        <input class="form-input" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Password</label>
+                        <input class="form-input" type="password" name="password" required minlength="4">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Role</label>
+                        <select class="form-input" name="role">
+                            <option value="employee">Employee</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-primary" type="submit">Create User</button>
+                    </div>
+                </form>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="settings-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-cog"></i> Shop Settings</h2>
+                </div>
+                <form id="shop-settings-form" class="form-grid">
+                    <div class="form-group">
+                        <label class="form-label">Shop name</label>
+                        <input class="form-input" name="shop_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Phone</label>
+                        <input class="form-input" name="phone">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Address</label>
+                        <input class="form-input" name="address">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Idle lock (minutes)</label>
+                        <input class="form-input" type="number" name="idle_minutes" min="1" value="30">
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" type="button" id="pick-logo-btn">Choose logo</button>
+                        <button class="btn btn-primary" type="submit">Save settings</button>
+                    </div>
+                </form>
+            </section>
         </main>
     </div>
 
@@ -523,6 +630,7 @@
     <script src="scripts/reports.js"></script>
     <script src="scripts/calculator.js"></script>
     <script src="scripts/dashboard.js"></script>
+    <script src="scripts/auth.js"></script>
     <script src="scripts/main.js"></script>
 </body>
 </html>

@@ -357,10 +357,10 @@ class InstallmentManager {
                     <button class="btn btn-secondary" onclick="app.installments.printCurrentSchedule()">
                         <i class="fas fa-print"></i> Print Schedule
                     </button>
-                    ${hasPurchaseId ? `
+                    ${hasPurchaseId && !(window.auth && window.auth.isEmployee()) ? `
                     <button class="btn btn-danger" onclick="app.installments.openDeleteScheduleModal(${this.installments[0].purchase_id})">
                         <i class="fas fa-trash"></i> Delete Schedule
-                    </button>` : `<!-- Debug: No purchase ID found -->`}
+                    </button>` : ''}
                 </div>
             </div>
         `;
@@ -455,9 +455,10 @@ class InstallmentManager {
                                         <button class="btn btn-sm btn-secondary" onclick="app.installments.openEditPaymentModal(${i.installment_id})">
                                             <i class="fas fa-edit"></i> Edit
                                         </button>
+                                        ${!(window.auth && window.auth.isEmployee()) ? `
                                         <button class="btn btn-sm btn-danger" onclick="app.installments.confirmVoidPayment(${i.installment_id})">
                                             <i class="fas fa-times"></i> Void
-                                        </button>
+                                        </button>` : ''}
                                     ` : (i.computedStatus === 'short' ? `
                                         <span class="badge badge-warning"><i class="fas fa-exclamation-triangle"></i> Short</span>
                                     ` : `
@@ -916,15 +917,17 @@ class InstallmentManager {
                                     <input type="number" id="payment-amount" name="amount" class="form-input" required min="0" step="0.01" value="${total}" onchange="app.installments.updateDiscountAmount()">
                                 </div>
                             </div>
+                            ${!(window.auth && window.auth.isEmployee()) ? `
                             <div class="form-group">
                                 <label class="form-label">
-                                    <input type="checkbox" id="mark-as-discount" name="mark_as_discount" style="margin-right: 8px;" onchange="app.installments.updateDiscountAmount()">
+                                    <input type="checkbox" id="mark-as-discount" name="mark_as_discount" class="discount-checkbox" onchange="app.installments.updateDiscountAmount()">
                                     Convert remaining unpaid amount to discount and close account
                                 </label>
                                 <div id="discount-info" style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; display: none;">
                                     <small class="text-muted">Discount amount: <span id="discount-amount">Rs. 0</span></small>
                                 </div>
                             </div>
+                            ` : ''}
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -1087,7 +1090,19 @@ class InstallmentManager {
         this.currentCustomer = null;
     }
 
+    confirmVoidPayment(installmentId) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
+        this.openVoidPaymentModal(installmentId);
+    }
+
     openVoidPaymentModal(installmentId) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
         const modalHtml = `
             <div class="modal">
                 <div class="modal-content modal-sm">

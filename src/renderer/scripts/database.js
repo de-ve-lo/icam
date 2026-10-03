@@ -104,11 +104,36 @@ class Database {
         );
     }
 
+    static currentUserId() {
+        return (window.auth && window.auth.user && window.auth.user.id) || null;
+    }
+
     static async logAudit({ userId = null, action, entityType = null, entityId = null, amount = null, detail = null } = {}) {
+        const uid = userId != null ? userId : this.currentUserId();
         return await this.run(
             'INSERT INTO audit_log (user_id, action, entity_type, entity_id, amount, detail) VALUES (?, ?, ?, ?, ?, ?)',
-            [userId, action, entityType, entityId, amount, detail]
+            [uid, action, entityType, entityId, amount, detail]
         );
+    }
+
+    static async listUsers() {
+        return await window._ipcRenderer.invoke('users-list');
+    }
+
+    static async createUser(user) {
+        return await window._ipcRenderer.invoke('users-create', user);
+    }
+
+    static async setUserActive(userId, isActive) {
+        return await window._ipcRenderer.invoke('users-set-active', { userId, isActive });
+    }
+
+    static async getShopSettings() {
+        try {
+            return await window._ipcRenderer.invoke('shop-settings-get');
+        } catch (e) {
+            return { shop_name: 'Installment Management', phone: '', address: '', logo_path: '', idle_minutes: 30 };
+        }
     }
 
     // Customers
@@ -343,7 +368,7 @@ class Database {
         const usedReceipt = receiptNo || this.generateReceiptNo();
         for (const entry of ledger) {
             await this.run(
-                'INSERT INTO payments (installment_id, customer_id, purchase_id, amount, payment_date, receipt_no, notes, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO payments (installment_id, customer_id, purchase_id, amount, payment_date, receipt_no, notes, type, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [
                     entry.installment_id,
                     entry.customer_id,
@@ -352,7 +377,8 @@ class Database {
                     entry.payment_date,
                     entry.receipt_no || usedReceipt,
                     entry.notes,
-                    entry.type || 'payment'
+                    entry.type || 'payment',
+                    this.currentUserId()
                 ]
             );
         }

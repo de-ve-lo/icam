@@ -52,9 +52,10 @@ class StockManager {
                         <button class="btn btn-sm btn-primary" onclick="app.stock.edit('${item.id}')">
                             <i class="fas fa-edit"></i>
                         </button>
+                        ${!(window.auth && window.auth.isEmployee()) ? `
                         <button class="btn btn-sm btn-danger" onclick="app.stock.confirmDelete('${item.id}')">
                             <i class="fas fa-trash"></i>
-                        </button>`}
+                        </button>` : ''}`}
                     </div>
                 </td>
             </tr>
@@ -445,6 +446,10 @@ class StockManager {
     }
 
     confirmDelete(id) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
         const modalHtml = `
             <div class="modal">
                 <div class="modal-content modal-sm">

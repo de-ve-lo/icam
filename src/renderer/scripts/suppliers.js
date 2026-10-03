@@ -43,11 +43,12 @@ class SupplierManager {
                             title="Edit Supplier">
                             <i class="fas fa-edit"></i>
                         </button>
+                        ${!(window.auth && window.auth.isEmployee()) ? `
                         <button class="btn btn-sm btn-danger" 
                             onclick="app.suppliers.confirmDelete(${supplier.id})" 
                             title="Delete Supplier">
                             <i class="fas fa-trash"></i>
-                        </button>
+                        </button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -276,6 +277,10 @@ class SupplierManager {
     }
 
     confirmDelete(id) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
         const supplier = this.suppliers.find(s => s.id === id);
         if (!supplier) return;
 

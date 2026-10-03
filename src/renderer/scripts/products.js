@@ -90,11 +90,12 @@ class ProductManager {
                             title="View Details">
                             <i class="fas fa-eye"></i>
                         </button>
+                        ${!(window.auth && window.auth.isEmployee()) ? `
                         <button class="btn btn-sm btn-danger" 
                             onclick="app.products.confirmDelete(${product.id})" 
                             title="Delete Product">
                             <i class="fas fa-trash"></i>
-                        </button>
+                        </button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -563,6 +564,10 @@ class ProductManager {
     }
 
     confirmDelete(id) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
         const product = this.products.find(p => p.id === id);
         if (!product) return;
         

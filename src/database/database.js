@@ -350,8 +350,13 @@ class DatabaseManager {
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL CHECK(role IN ('admin','employee')),
         is_active INTEGER NOT NULL DEFAULT 1,
+        must_change INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      if (!(await this.columnExists('users', 'must_change'))) {
+        await this.run('ALTER TABLE users ADD COLUMN must_change INTEGER DEFAULT 0');
+        console.log('Migration applied: users.must_change');
+      }
 
       await this.run(`CREATE TABLE IF NOT EXISTS shop_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),

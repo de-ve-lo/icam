@@ -46,9 +46,10 @@ class CustomerManager {
                         <button class="btn btn-sm btn-primary" onclick="app.customers.edit(${c.id})">
                             <i class="fas fa-edit"></i>
                         </button>
+                        ${!(window.auth && window.auth.isEmployee()) ? `
                         <button class="btn btn-sm btn-danger" onclick="app.customers.confirmDelete(${c.id})">
                             <i class="fas fa-trash"></i>
-                        </button>
+                        </button>` : ''}
                     </div>
                 </td>
             </tr>
@@ -397,6 +398,10 @@ class CustomerManager {
     }
 
     confirmDelete(id) {
+        if (window.auth && window.auth.isEmployee()) {
+            window.auth.requireAdmin();
+            return;
+        }
         const customer = this.customers.find(c => c.id === id);
         if (!customer) return;
 

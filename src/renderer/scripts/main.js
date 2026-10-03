@@ -12,7 +12,18 @@ class App {
 
     init() {
         this.setupEventListeners();
+        if (window.auth) {
+            window.auth.boot();
+        } else {
+            this.startAuthenticated();
+        }
+    }
+
+    async startAuthenticated() {
+        if (this._started) return;
+        this._started = true;
         this.initializeModules();
+        if (window.auth) window.auth.applyRoleGates();
         this.showLoading();
         this.loadDashboard();
     }
@@ -53,6 +64,25 @@ class App {
             resetBtn.addEventListener('click', () => {
                 this.showSystemResetConfirm();
             });
+        }
+
+        const createUserForm = document.getElementById('create-user-form');
+        if (createUserForm) {
+            createUserForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.createUser(new FormData(createUserForm));
+            });
+        }
+        const shopForm = document.getElementById('shop-settings-form');
+        if (shopForm) {
+            shopForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveShopSettings(new FormData(shopForm));
+            });
+        }
+        const pickLogoBtn = document.getElementById('pick-logo-btn');
+        if (pickLogoBtn) {
+            pickLogoBtn.addEventListener('click', () => this.pickShopLogo());
         }
 
         // Modal close handlers
@@ -139,6 +169,10 @@ class App {
 
     navigateToSection(section) {
         if (this.isLoading || section === this.currentSection) return;
+        if ((section === 'users' || section === 'settings') && window.auth && !window.auth.isAdmin()) {
+            this.showNotification('Admin permission required', 'error');
+            return;
+        }
 
         // Update navigation
         document.querySelectorAll('.nav-item').forEach(item => {
@@ -201,6 +235,12 @@ class App {
                     break;
                 case 'reports':
                     await this.loadReportsSection();
+                    break;
+                case 'users':
+                    await this.loadUsersSection();
+                    break;
+                case 'settings':
+                    await this.loadSettingsSection();
                     break;
             }
         } catch (error) {
@@ -463,6 +503,10 @@ class App {
     }
 
     showSystemResetConfirm() {
+        if (window.auth && !window.auth.isAdmin()) {
+            this.showNotification('Admin permission required', 'error');
+            return;
+        }
         const modalHtml = `
             <div class="modal">
                 <div class="modal-content modal-sm">
@@ -548,6 +592,86 @@ class App {
         } finally {
             this.hideLoading();
         }
+    }
+
+    async loadUsersSection() {
+        if (window.auth && !window.auth.isAdmin()) return;
+        const rows = await window._ipcRenderer.invoke('users-list');
+        const body = document.getElementById('users-table-body');
+        if (!body) return;
+        body.innerHTML = (rows || []).map((u) => `
+            <tr>
+                <td>${u.username}</td>
+                <td>${u.role}</td>
+                <td>${u.is_active ? 'Active' : 'Inactive'}</td>
+                <td>
+                    ${u.id === (window.auth && window.auth.user && window.auth.user.id) ? '' : `
+                    <button class="btn btn-sm btn-secondary" onclick="app.setUserActive(${u.id}, ${u.is_active ? 0 : 1})">
+                        ${u.is_active ? 'Deactivate' : 'Activate'}
+                    </button>`}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    async createUser(formData) {
+        if (window.auth) window.auth.requireAdmin();
+        const result = await window._ipcRenderer.invoke('users-create', {
+            username: formData.get('username'),
+            password: formData.get('password'),
+            role: formData.get('role')
+        });
+        if (!result || !result.ok) {
+            this.showNotification('Could not create user', 'error');
+            return;
+        }
+        this.showNotification('User created', 'success');
+        document.getElementById('create-user-form').reset();
+        await this.loadUsersSection();
+    }
+
+    async setUserActive(userId, isActive) {
+        if (window.auth) window.auth.requireAdmin();
+        await window._ipcRenderer.invoke('users-set-active', { userId, isActive: !!isActive });
+        await this.loadUsersSection();
+    }
+
+    async loadSettingsSection() {
+        if (window.auth && !window.auth.isAdmin()) return;
+        const settings = await window._ipcRenderer.invoke('shop-settings-get');
+        const form = document.getElementById('shop-settings-form');
+        if (!form || !settings) return;
+        form.shop_name.value = settings.shop_name || '';
+        form.phone.value = settings.phone || '';
+        form.address.value = settings.address || '';
+        form.idle_minutes.value = settings.idle_minutes || 30;
+    }
+
+    async saveShopSettings(formData) {
+        if (window.auth) window.auth.requireAdmin();
+        const result = await window._ipcRenderer.invoke('shop-settings-save', {
+            shop_name: formData.get('shop_name'),
+            phone: formData.get('phone'),
+            address: formData.get('address'),
+            idle_minutes: formData.get('idle_minutes')
+        });
+        if (!result || !result.ok) {
+            this.showNotification('Could not save settings', 'error');
+            return;
+        }
+        if (window.auth) {
+            window.auth.shopName = formData.get('shop_name');
+            window.auth.idleMinutes = Number(formData.get('idle_minutes')) || 30;
+            window.auth.applyRoleGates();
+            window.auth.resetIdleTimer();
+        }
+        this.showNotification('Settings saved', 'success');
+    }
+
+    async pickShopLogo() {
+        if (window.auth) window.auth.requireAdmin();
+        const result = await window._ipcRenderer.invoke('shop-logo-pick');
+        if (result && result.ok) this.showNotification('Logo updated', 'success');
     }
 
     formatCurrency(amount) {
