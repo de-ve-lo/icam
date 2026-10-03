@@ -5,6 +5,10 @@ const crypto = require('crypto');
 const DatabaseManager = require('./database/database');
 
 // Disable hardware acceleration to avoid GPU process crashes on some Windows setups
+if (process.argv.includes('--dev')) {
+  process.env.NODE_ENV = 'development';
+}
+
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 
@@ -60,9 +64,10 @@ function createWindow() {
     minWidth: 768,
     minHeight: 600,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      enableRemoteModule: true,
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
       backgroundThrottling: false
     },
     icon: path.join(__dirname, '../assets/icon.png'),
@@ -230,28 +235,13 @@ ipcMain.handle('db-reset', async (event) => {
       db.close();
     }
     
-    // Reset database manually
-    const fs = require('fs');
-    const dbPath = path.join(__dirname, '../database/installments.db');
-    
+    const dbPath = db && db.dbPath
+      ? db.dbPath
+      : path.join(__dirname, '../database/installments.db');
     console.log('Database path:', dbPath);
-    
-    // Delete database file if it exists
     if (fs.existsSync(dbPath)) {
       fs.unlinkSync(dbPath);
       console.log('Database file deleted successfully');
-    }
-    
-    // Also clean any backup files
-    const backupDir = path.join(__dirname, '../database/backups');
-    if (fs.existsSync(backupDir)) {
-      const backups = fs.readdirSync(backupDir);
-      backups.forEach(file => {
-        if (file.endsWith('.db')) {
-          fs.unlinkSync(path.join(backupDir, file));
-          console.log(`Deleted backup: ${file}`);
-        }
-      });
     }
     
     db = new DatabaseManager();
@@ -379,7 +369,7 @@ ipcMain.handle('shop-settings-save', async (event, settings = {}) => {
   return { ok: true };
 });
 
-ipcMain.handle('shop-logo-pick', async () => {
+async function pickShopLogo() {
   if (!currentUser || currentUser.role !== 'admin' || !mainWindow) return { ok: false };
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose shop logo',
@@ -391,4 +381,7 @@ ipcMain.handle('shop-logo-pick', async () => {
   fs.copyFileSync(result.filePaths[0], dest);
   await db.run('UPDATE shop_settings SET logo_path = ? WHERE id = 1', [dest]);
   return { ok: true, logo_path: dest };
-});
+}
+
+ipcMain.handle('choose-logo', pickShopLogo);
+ipcMain.handle('shop-logo-pick', pickShopLogo);

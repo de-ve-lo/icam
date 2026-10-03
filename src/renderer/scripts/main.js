@@ -1,6 +1,6 @@
 // Main Application Controller
 if (!window._ipcRenderer) {
-    window._ipcRenderer = require('electron').ipcRenderer;
+    window._ipcRenderer = window.electronAPI;
 }
 
 class App {
@@ -126,6 +126,16 @@ class App {
                 this.closeModal();
             }
         });
+
+        if (window.electronAPI && window.electronAPI.on) {
+            window.electronAPI.on('backup-database', () => this.createBackup());
+            window.electronAPI.on('restore-database', () => {
+                this.showNotification('Restore from File > Restore Database is not available here. Use a backup copy of the database file.', 'warning');
+            });
+            window.electronAPI.on('show-about', () => {
+                this.showNotification('Installment Management — local shop app. Default login admin / admin.', 'info');
+            });
+        }
 
         // Window events
         window.addEventListener('beforeunload', () => {

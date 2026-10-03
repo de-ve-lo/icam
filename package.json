@@ -25,11 +25,7 @@
     "electron-builder": "^24.6.4"
   },
   "dependencies": {
-    "sqlite3": "^5.1.6",
-    "chart.js": "^4.4.0",
-    "jspdf": "^2.5.1",
-    "html2canvas": "^1.4.1",
-    "moment": "^2.29.4"
+    "better-sqlite3": "^9.6.0"
   },
   "build": {
     "appId": "com.installmentmanagement.app",
@@ -40,13 +36,17 @@
     "files": [
       "src/**/*",
       "assets/**/*",
-      "database/**/*",
-      "node_modules/**/*",
       "package.json"
     ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

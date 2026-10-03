@@ -1,6 +1,6 @@
 // Database Interface for Renderer Process
 if (!window._ipcRenderer) {
-    window._ipcRenderer = require('electron').ipcRenderer;
+    window._ipcRenderer = window.electronAPI;
 }
 
 class Database {

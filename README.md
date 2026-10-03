@@ -24,62 +24,30 @@ A comprehensive desktop application for managing motorcycle/bike installment sal
 - Real-time dashboard with business statistics
 - Modern, responsive user interface
 
-## Installation Requirements
+## Shop PC install
 
-Before running the application, ensure you have the following installed:
+Install from `dist/*.exe` (NSIS installer). Default login is `admin` / `admin`; you must change the password on first sign-in.
 
-### Required Software
-1. **Node.js** (version 16 or higher)
-   - Download from: https://nodejs.org/
-   - Verify installation: `node --version`
+The live database lives in the Electron `userData` folder (not next to the installer). Use Backup in the header to copy it.
 
-2. **npm** (comes with Node.js)
-   - Verify installation: `npm --version`
+## Developer setup
 
-3. **Git** (optional, for version control)
-   - Download from: https://git-scm.com/
-
-## Installation Steps
-
-### Step 1: Install Dependencies
-Navigate to the project directory in PowerShell/Command Prompt and run:
+Node.js 16+ is required.
 
 ```bash
 npm install
-```
-
-This will install all required dependencies including:
-- Electron framework
-- SQLite database driver
-- Chart.js for analytics
-- PDF generation libraries
-- Build tools
-
-### Step 2: Development Mode
-To run the application in development mode:
-
-```bash
-npm start
-```
-
-Or alternatively:
-```bash
 npm run dev
 ```
 
-### Step 3: Building for Production
+Shop PCs should run the installed app, not `start.bat`. Developers use `npm install` once and `npm run dev`.
 
-#### Build for Windows
+### Windows installer (build on Windows / CI)
+
 ```bash
 npm run build-win
 ```
 
-This creates a Windows executable in the `dist/` folder.
-
-#### General Build
-```bash
-npm run build
-```
+The installer is written to `dist/`. This Linux workspace may not produce an `.exe`.
 
 ## Project Structure
 
@@ -169,12 +137,9 @@ The application uses SQLite with the following main tables:
 
 ### Automatic Backup
 - Click "Backup" button in header
-- Backup files stored in `database/backups/`
+- Packaged app backups are written next to the `userData` database (`backups/`)
+- Dev mode still uses `database/backups/`
 - Files named with timestamp for easy identification
-
-### Manual Backup
-- Copy `database/installments.db` to safe location
-- Restore by replacing database file
 
 ## Troubleshooting
 
@@ -186,8 +151,8 @@ The application uses SQLite with the following main tables:
 - Check for error messages in console
 
 **Database errors:**
-- Check if `database/` directory has write permissions
-- Verify SQLite3 module is installed: `npm list sqlite3`
+- Check write permissions for Electron `userData` (or `database/` in `npm run dev`)
+- Verify better-sqlite3 is installed: `npm list better-sqlite3`
 
 **Build failures:**
 - Clear node_modules: `rm -rf node_modules && npm install`

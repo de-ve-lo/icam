@@ -1,33 +1,29 @@
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { app } = require('electron');
 
 class DatabaseManager {
   constructor() {
-    this.dbPath = path.join(__dirname, '../../database/installments.db');
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+      this.dbPath = path.join(__dirname, '../../database/installments.db');
+    } else {
+      const userData = (app && app.getPath) ? app.getPath('userData') : path.join(__dirname, '../../database');
+      this.dbPath = path.join(userData, 'installments.db');
+    }
     this.db = null;
   }
 
-  initialize() {
-    return new Promise((resolve, reject) => {
-      // Ensure database directory exists
-      const dbDir = path.dirname(this.dbPath);
-      if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-      }
-
-      this.db = new sqlite3.Database(this.dbPath, (err) => {
-        if (err) {
-          console.error('Error opening database:', err);
-          reject(err);
-        } else {
-          console.log('Connected to SQLite database');
-          this.createTables()
-            .then(resolve)
-            .catch(reject);
-        }
-      });
-    });
+  async initialize() {
+    const dbDir = path.dirname(this.dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    this.db = new Database(this.dbPath);
+    this.db.pragma('foreign_keys = ON');
+    console.log('Connected to SQLite database');
+    await this.createTables();
   }
 
   async createTables() {
@@ -390,95 +386,82 @@ class DatabaseManager {
   }
 
   query(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      this.db.all(sql, params, (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      });
-    });
+    try {
+      const rows = this.db.prepare(sql).all(...(params || []));
+      return Promise.resolve(rows);
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   get(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      this.db.get(sql, params, (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row);
-        }
-      });
-    });
+    try {
+      const row = this.db.prepare(sql).get(...(params || []));
+      return Promise.resolve(row);
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   run(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      this.db.run(sql, params, function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({
-            id: this.lastID,
-            changes: this.changes
-          });
-        }
+    try {
+      const info = this.db.prepare(sql).run(...(params || []));
+      return Promise.resolve({
+        id: info.lastInsertRowid,
+        changes: info.changes
       });
-    });
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   backup(backupPath) {
-    return new Promise((resolve, reject) => {
+    try {
       if (!backupPath) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        backupPath = path.join(__dirname, '../../database/backups', `backup_${timestamp}.db`);
+        const backupDir = path.join(path.dirname(this.dbPath), 'backups');
+        if (!fs.existsSync(backupDir)) {
+          fs.mkdirSync(backupDir, { recursive: true });
+        }
+        backupPath = path.join(backupDir, `backup_${timestamp}.db`);
       }
-
-      // Ensure backup directory exists
       const backupDir = path.dirname(backupPath);
       if (!fs.existsSync(backupDir)) {
         fs.mkdirSync(backupDir, { recursive: true });
       }
-
-      fs.copyFile(this.dbPath, backupPath, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          console.log(`Database backed up to: ${backupPath}`);
-          resolve(backupPath);
-        }
-      });
-    });
+      fs.copyFileSync(this.dbPath, backupPath);
+      console.log(`Database backed up to: ${backupPath}`);
+      return Promise.resolve(backupPath);
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   restore(backupPath) {
-    return new Promise((resolve, reject) => {
+    try {
       if (!fs.existsSync(backupPath)) {
-        reject(new Error('Backup file not found'));
-        return;
+        return Promise.reject(new Error('Backup file not found'));
       }
-
-      fs.copyFile(backupPath, this.dbPath, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          console.log('Database restored from backup');
-          resolve();
-        }
-      });
-    });
+      if (this.db) this.db.close();
+      fs.copyFileSync(backupPath, this.dbPath);
+      this.db = new Database(this.dbPath);
+      this.db.pragma('foreign_keys = ON');
+      console.log('Database restored from backup');
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(err);
+    }
   }
 
   close() {
     if (this.db) {
-      this.db.close((err) => {
-        if (err) {
-          console.error('Error closing database:', err);
-        } else {
-          console.log('Database connection closed');
-        }
-      });
+      try {
+        this.db.close();
+        console.log('Database connection closed');
+      } catch (err) {
+        console.error('Error closing database:', err);
+      }
+      this.db = null;
     }
   }
 }

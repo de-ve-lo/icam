@@ -3,8 +3,8 @@ class AuthManager {
         this.user = null;
         this.idleTimer = null;
         this.idleMinutes = 30;
-        this.ipc = window._ipcRenderer || (typeof require === 'function' ? require('electron').ipcRenderer : null);
-        if (!window._ipcRenderer && this.ipc) window._ipcRenderer = this.ipc;
+        this.ipc = window.electronAPI || window._ipcRenderer;
+        if (this.ipc) window._ipcRenderer = this.ipc;
     }
 
     async session() {
