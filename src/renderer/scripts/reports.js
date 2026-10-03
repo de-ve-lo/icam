@@ -2,7 +2,9 @@
 
 class ReportsManager {
     constructor() {
-        this.setupEventListeners();
+        if (typeof document !== 'undefined') {
+            this.setupEventListeners();
+        }
     }
     
     // Safe fallback methods in case app object doesn't exist
@@ -39,7 +41,7 @@ class ReportsManager {
         if (typeof Utils !== 'undefined' && Utils.formatCurrency) {
             return Utils.formatCurrency(amount);
         }
-        return `$${(amount || 0).toFixed(2)}`;
+        return `Rs. ${(amount || 0).toFixed(2)}`;
     }
     
     safeFormatDate(date) {
@@ -54,9 +56,7 @@ class ReportsManager {
         // Set up date range controls
         this.setupDateRangeControls();
         // Bind helpers for date range modal interactions
-        window.reports = window.reports || this;
-        window.reports.resolveDateRange = this.resolveDateRange.bind(this);
-        window.reports.setQuickDateRange = this.setQuickDateRange.bind(this);
+        window.reports = this;
     }
 
     setupDateRangeControls() {
@@ -92,7 +92,80 @@ class ReportsManager {
     }
 
     formatDateForInput(date) {
-        return date.toISOString().split('T')[0];
+        if (typeof Utils !== 'undefined' && Utils.toLocalDateString) {
+            return Utils.toLocalDateString(date);
+        }
+        const d = date instanceof Date ? date : new Date(date);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    static sumPaymentsInRange(payments, start, end) {
+        return (payments || [])
+            .filter((p) => (p.type || 'payment') === 'payment'
+                && p.payment_date >= start && p.payment_date <= end)
+            .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    }
+
+    getLocalRange() {
+        const startEl = document.getElementById('reports-start-date');
+        const endEl = document.getElementById('reports-end-date');
+        const now = new Date();
+        const start = (startEl && startEl.value) || this.formatDateForInput(new Date(now.getFullYear(), now.getMonth(), 1));
+        const end = (endEl && endEl.value) || this.formatDateForInput(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+        return { start, end };
+    }
+
+    async loadCollectionFromPayments(start, end) {
+        return await this.safeQuery(`
+            SELECT payment_date, amount, type, customer_id, installment_id, receipt_no
+            FROM payments
+            WHERE DATE(payment_date) BETWEEN DATE(?) AND DATE(?)
+              AND (is_deleted = 0 OR is_deleted IS NULL)
+        `, [start, end], []);
+    }
+
+    async getShopName() {
+        try {
+            const row = await Database.get('SELECT shop_name FROM shop_settings WHERE id = 1');
+            this._shopName = (row && row.shop_name) || 'Installment Management';
+            return this._shopName;
+        } catch (e) {
+            this._shopName = 'Installment Management';
+            return this._shopName;
+        }
+    }
+
+    renderReport(html) {
+        const panel = document.getElementById('reports-output');
+        if (!panel) return;
+        panel.innerHTML = html;
+    }
+
+    emptyReport(title) {
+        return `<div class="card"><div class="card-body"><h3>${title}</h3><p class="text-muted">No data for this period</p></div></div>`;
+    }
+
+    wrapPanel(title, period, inner, shopName) {
+        const name = shopName || this._shopName || 'Installment Management';
+        return `<div class="report-panel" id="report-print-area">
+            <button type="button" class="btn btn-secondary print-btn" onclick="window.print()">Print Report</button>
+            <h2>${name}</h2>
+            <h3>${title}</h3>
+            <p>Period: ${period || 'All dates'}</p>
+            ${inner}
+            <p><strong>Generated on:</strong> ${this.safeFormatDate(new Date())}</p>
+        </div>`;
+    }
+
+    safeCapitalize(str) {
+        if (typeof Utils !== 'undefined' && Utils.capitalizeWords) {
+            return Utils.capitalizeWords(str);
+        }
+        if (!str) return '';
+        return String(str).replace(/\b\w/g, (l) => l.toUpperCase());
     }
 
     handleQuickDateSelect(range) {
@@ -181,13 +254,14 @@ class ReportsManager {
         const endDateInput = document.getElementById('reports-end-date');
         
         if (!startDateInput || !endDateInput) {
-            // Return current month if inputs not available
             const now = new Date();
+            const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             return {
-                startDate: new Date(now.getFullYear(), now.getMonth(), 1),
-                endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0),
-                startDateStr: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0],
-                endDateStr: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+                startDate,
+                endDate,
+                startDateStr: this.formatDateForInput(startDate),
+                endDateStr: this.formatDateForInput(endDate)
             };
         }
         
@@ -195,13 +269,14 @@ class ReportsManager {
         const endDateStr = endDateInput.value;
         
         if (!startDateStr || !endDateStr) {
-            // Return current month if no dates selected
             const now = new Date();
+            const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             return {
-                startDate: new Date(now.getFullYear(), now.getMonth(), 1),
-                endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0),
-                startDateStr: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0],
-                endDateStr: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+                startDate,
+                endDate,
+                startDateStr: this.formatDateForInput(startDate),
+                endDateStr: this.formatDateForInput(endDate)
             };
         }
         
@@ -219,7 +294,7 @@ class ReportsManager {
             this.safeShowLoading();
             
             const monthlyData = await this.getMonthlyCollectionData();
-            console.log('Monthly data loaded:', monthlyData);
+            monthlyData.shopName = await this.getShopName();
             this.showMonthlyReport(monthlyData);
             
         } catch (error) {
@@ -235,6 +310,7 @@ class ReportsManager {
             this.safeShowLoading();
             
             const outstandingData = await this.getOutstandingData();
+            outstandingData.shopName = await this.getShopName();
             this.showOutstandingReport(outstandingData);
             
         } catch (error) {
@@ -306,69 +382,65 @@ class ReportsManager {
     }
 
     // Data collection methods
+    async generate(type) {
+        switch (type) {
+            case 'monthly':
+                return await this.generateMonthlyReport();
+            case 'outstanding':
+                return await this.generateOutstandingReport();
+            case 'cashsales':
+                return await this.generateCashSalesReport();
+            case 'supplier':
+                return await this.generateSupplierPaymentsReport();
+            case 'expense':
+                return await this.generateExpenseReport();
+            case 'stock':
+                return await this.generateStockReport();
+            case 'cashbook':
+                return await this.generateDailyCashBook();
+            case 'aging':
+                return await this.generateOverdueAging();
+            case 'statement':
+                return await this.generateCustomerStatement();
+            case 'profit':
+                return await this.generateProfitSnapshot();
+            default:
+                this.safeShowNotification('Unknown report type', 'error');
+        }
+    }
+
     async getMonthlyCollectionData() {
         try {
-            const dateRange = this.getSelectedDateRange();
-            
-            // Get installment collections with better error handling
-            const installmentCollections = await this.safeQuery(`
-                SELECT 
-                    COALESCE(SUM(paid_amount), 0) as total_amount,
-                    COUNT(CASE WHEN paid_amount > 0 THEN 1 END) as transaction_count
-                FROM installments 
-                WHERE DATE(COALESCE(paid_date, created_at)) BETWEEN DATE(?) AND DATE(?)
-                  AND paid_amount > 0
-                  AND (is_deleted = 0 OR is_deleted IS NULL)
-            `, [dateRange.startDateStr, dateRange.endDateStr], [{ total_amount: 0, transaction_count: 0 }]);
-
-            // Get cash sale collections with better error handling
+            const range = this.getLocalRange();
+            const payments = await this.loadCollectionFromPayments(range.start, range.end);
+            const cashCollected = ReportsManager.sumPaymentsInRange(payments, range.start, range.end);
+            const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
             const cashSaleCollections = await this.safeQuery(`
-                SELECT 
+                SELECT
                     COALESCE(SUM(received_price), 0) as total_amount,
                     COUNT(*) as transaction_count
-                FROM cash_sales 
+                FROM cash_sales
                 WHERE DATE(sale_date) BETWEEN DATE(?) AND DATE(?)
                   AND received_price > 0
-            `, [dateRange.startDateStr, dateRange.endDateStr], [{ total_amount: 0, transaction_count: 0 }]);
+            `, [range.start, range.end], [{ total_amount: 0, transaction_count: 0 }]);
 
             return {
-                installments: installmentCollections[0] || { total_amount: 0, transaction_count: 0 },
+                installments: { total_amount: cashCollected, transaction_count: paymentRows.length },
                 cashSales: cashSaleCollections[0] || { total_amount: 0, transaction_count: 0 },
-                dateRange: `${dateRange.startDateStr} to ${dateRange.endDateStr}`
+                payments: paymentRows,
+                dateRange: `${range.start} to ${range.end}`
             };
         } catch (error) {
             console.error('Error in getMonthlyCollectionData:', error);
-            const dateRange = this.getSelectedDateRange();
+            const range = this.getLocalRange();
             return {
                 installments: { total_amount: 0, transaction_count: 0 },
                 cashSales: { total_amount: 0, transaction_count: 0 },
-                dateRange: `${dateRange.startDateStr} to ${dateRange.endDateStr}`,
+                payments: [],
+                dateRange: `${range.start} to ${range.end}`,
                 error: error.message
             };
         }
-    }
-
-    // Add missing primary methods that aliases call
-    async generateMonthlyCollectionReport() {
-        try {
-            console.log('Generating monthly collection report...');
-            app.showLoading();
-            
-            const monthlyData = await this.getMonthlyCollectionData();
-            console.log('Monthly data loaded:', monthlyData);
-            this.showMonthlyReport(monthlyData);
-            
-        } catch (error) {
-            console.error('Error generating monthly collection report:', error);
-            app.showNotification(`Failed to generate monthly report: ${error.message}`, 'error');
-        } finally {
-            app.hideLoading();
-        }
-    }
-
-    // Add alias methods for HTML onclick compatibility
-    async generateMonthlyReport() {
-        return await this.generateMonthlyCollectionReport();
     }
 
     async generateOutstandingReport() {
@@ -399,22 +471,18 @@ class ReportsManager {
                     COALESCE(c.customer_name, 'N/A') as customer_name,
                     COALESCE(c.account_no, 'N/A') as account_no,
                     COALESCE(c.phone, 'N/A') as phone,
-                    cp.delivery_date,
-                    SUM(
-                        CASE WHEN COALESCE(i.original_amount, i.amount) > COALESCE(i.paid_amount, 0) 
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) 
-                             ELSE 0 END
-                    ) as total_short_amount,
+                    cp.start_date,
+                    SUM(COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) as total_short_amount,
                     COUNT(CASE WHEN i.status != 'paid' AND i.status != 'settled' THEN 1 END) as pending_installments,
-                    COUNT(CASE WHEN i.due_date < date('now') AND i.status != 'paid' AND i.status != 'settled' THEN 1 END) as overdue_installments
+                    COUNT(CASE WHEN i.due_date < date('now') AND i.status != 'paid' AND i.status != 'settled' THEN 1 END) as overdue_installments,
+                    (SELECT MAX(p.payment_date) FROM payments p WHERE p.customer_id = c.id AND (p.type IS NULL OR p.type = 'payment') AND (p.is_deleted = 0 OR p.is_deleted IS NULL)) as last_payment_date
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
                 JOIN customers c ON cp.customer_id = c.id
-                WHERE i.status != 'paid' AND i.status != 'settled'
-                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
-                GROUP BY c.id, c.customer_name, c.account_no, c.phone, cp.delivery_date
+                GROUP BY c.id, c.customer_name, c.account_no, c.phone, cp.id, cp.start_date
                 HAVING total_short_amount > 0
                 ORDER BY total_short_amount DESC
             `, [], []);
@@ -548,6 +616,7 @@ class ReportsManager {
 
     async getStockReportData() {
         try {
+            const dateRange = this.getSelectedDateRange();
             const stockSummary = await this.safeQuery(`
                 SELECT 
                     p.item_name,
@@ -573,7 +642,7 @@ class ReportsManager {
                 JOIN customers c ON cp.customer_id = c.id
                 JOIN stock s ON cp.stock_id = s.id
                 JOIN products p ON s.product_id = p.id
-                WHERE cp.created_at >= date('now', '-30 days')
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                 
                 UNION ALL
@@ -589,11 +658,11 @@ class ReportsManager {
                 LEFT JOIN customers c ON cs.customer_id = c.id
                 JOIN stock s ON cs.stock_id = s.id
                 JOIN products p ON s.product_id = p.id
-                WHERE cs.created_at >= date('now', '-30 days')
+                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
                 
                 ORDER BY sale_date DESC
                 LIMIT 50
-            `, [], []);
+            `, [dateRange.startDateStr, dateRange.endDateStr, dateRange.startDateStr, dateRange.endDateStr], []);
 
             return {
                 stockSummary: stockSummary || [],
@@ -616,722 +685,677 @@ class ReportsManager {
     }
 
     async generateReportWithDateRange(reportType) {
-        try {
-            // Show date range selection popup
-            const reportNames = {
-                'monthly': 'Monthly Collection Report',
-                'outstanding': 'Customer Outstanding Report', 
-                'cashsales': 'Cash Sales Report',
-                'supplier': 'Supplier Payments Report',
-                'expense': 'Expense Report',
-                'stock': 'Stock Report'
-            };
-            
-            const reportName = reportNames[reportType] || 'Report';
-            const dateRange = await this.showDateRangeModal(
-                reportName, 
-                `Select date range for ${reportName.toLowerCase()}`
-            );
-            
-            if (!dateRange) {
-                return; // User cancelled
-            }
-            
-            // Temporarily set the date range for the report generation
-            this.tempDateRange = dateRange;
-            
-            // Generate the appropriate report
-            switch (reportType) {
-                case 'monthly':
-                    await this.generateMonthlyReport();
-                    break;
-                case 'outstanding':
-                    await this.generateOutstandingReport();
-                    break;
-                case 'cashsales':
-                    await this.generateCashSalesReport();
-                    break;
-                case 'supplier':
-                    await this.generateSupplierPaymentsReport();
-                    break;
-                case 'expense':
-                    await this.generateExpenseReport();
-                    break;
-                case 'stock':
-                    await this.generateStockReport();
-                    break;
-                default:
-                    app.showNotification('Unknown report type', 'error');
-            }
-            
-        } catch (error) {
-            console.error('Error generating report with date range:', error);
-            this.safeShowNotification(`Failed to generate report: ${error.message}`, 'error');
-        } finally {
-            // Clean up all temporary data
-            this.cleanupTempData();
-        }
+        return await this.generate(reportType);
     }
 
-    // Modal helpers for date range popup (DEPRECATED - using resolveDateRange below at line 2066)
-    // This method is kept for backward compatibility with older modal code
-    // resolveDateRange(selection) {
-    //     const modal = document.getElementById('reports-date-modal');
-    //     if (!modal) {
-    //         if (this.dateRangeResolver) this.dateRangeResolver(null);
-    //         this.dateRangeResolver = null;
-    //         return;
-    //     }
-    //     if (!selection) {
-    //         modal.remove();
-    //         if (this.dateRangeResolver) this.dateRangeResolver(null);
-    //         this.dateRangeResolver = null;
-    //         return;
-    //     }
-    //     const form = modal.querySelector('#date-range-form');
-    //     if (!form) {
-    //         modal.remove();
-    //         if (this.dateRangeResolver) this.dateRangeResolver(null);
-    //         this.dateRangeResolver = null;
-    //         return;
-    //     }
-    //     const startEl = form.querySelector('input[name="start_date"]');
-    //     const endEl = form.querySelector('input[name="end_date"]');
-    //     if (!startEl || !endEl) {
-    //         modal.remove();
-    //         if (this.dateRangeResolver) this.dateRangeResolver(null);
-    //         this.dateRangeResolver = null;
-    //         return;
-    //     }
-    //     const startDate = startEl.value;
-    //     const endDate = endEl.value;
-    //     modal.remove();
-    //     if (this.dateRangeResolver) this.dateRangeResolver({ startDate, endDate });
-    //     this.dateRangeResolver = null;
-    // }
-
-    setQuickDateRange(preset) {
-        const modal = document.getElementById('reports-date-modal');
-        if (!modal) return;
-        const startEl = modal.querySelector('input[name="start_date"]');
-        const endEl = modal.querySelector('input[name="end_date"]');
-        const now = new Date();
-        let start, end;
-        switch (preset) {
-            case 'today':
-                start = end = now; break;
-            case 'thisWeek': {
-                const day = now.getDay();
-                start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
-                end = now; break;
-            }
-            case 'thisMonth':
-                start = new Date(now.getFullYear(), now.getMonth(), 1);
-                end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                break;
-            case 'lastMonth':
-                start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-                end = new Date(now.getFullYear(), now.getMonth(), 0);
-                break;
-            case 'last3Months':
-                start = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-                end = now; break;
-            default:
-                return;
-        }
-        const fmt = (d) => d.toISOString().split('T')[0];
-        startEl.value = fmt(start);
-        endEl.value = fmt(end);
-    }
-
-    // Report display methods
     showMonthlyReport(data) {
-        // Check for data collection errors
         const hasErrors = data.error;
-        const errorMessage = hasErrors ? `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px;"><strong>Warning:</strong> Some data could not be loaded: ${data.error}</div>` : '';
-        
+        const errorMessage = hasErrors ? `<div class="alert alert-danger"><strong>Warning:</strong> Some data could not be loaded: ${data.error}</div>` : '';
         const totalCollections = (data.installments.total_amount || 0) + (data.cashSales.total_amount || 0);
         const totalTransactions = (data.installments.transaction_count || 0) + (data.cashSales.transaction_count || 0);
-
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Monthly Collection Report - ${data.month}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1, h2 { color: #333; }
-                    .summary { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-                    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
-                    .summary-card { background: white; padding: 15px; border-radius: 6px; text-align: center; }
-                    .amount { font-size: 24px; font-weight: bold; color: #28a745; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Monthly Collection Report</h1>
-                <h2>Period: ${data.dateRange || 'Current Period'}</h2>
-                
-                ${errorMessage}
-                
-                <div class="summary">
-                    <div class="summary-grid">
-                        <div class="summary-card">
-                            <h3>Total Collections</h3>
-                            <div class="amount">${this.safeFormatCurrency(totalCollections)}</div>
-                            <p>${totalTransactions} transactions</p>
-                        </div>
-                        <div class="summary-card">
-                            <h3>Installment Collections</h3>
-                            <div class="amount">${Utils.formatCurrency(data.installments.total_amount || 0)}</div>
-                            <p>${data.installments.transaction_count || 0} payments</p>
-                        </div>
-                        <div class="summary-card">
-                            <h3>Cash Sales</h3>
-                            <div class="amount">${Utils.formatCurrency(data.cashSales.total_amount || 0)}</div>
-                            <p>${data.cashSales.transaction_count || 0} sales</p>
-                        </div>
-                    </div>
+        if (totalCollections === 0 && !hasErrors) {
+            this.renderReport(this.emptyReport('Monthly Collection Report'));
+            return;
+        }
+        const inner = `
+            ${errorMessage}
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <h4>Total Collections</h4>
+                    <div class="amount">${this.safeFormatCurrency(totalCollections)}</div>
+                    <p>${totalTransactions} transactions</p>
                 </div>
-                
-                ${totalCollections === 0 ? `<div style="text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><h3 style="color: #6c757d;">No Data Found</h3><p style="color: #6c757d;">No collection data found for the selected period: ${data.dateRange || 'Current Period'}</p></div>` : ''}
-                
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString('en-US', { 
-                    year: 'numeric', month: 'long', day: 'numeric', 
-                    hour: '2-digit', minute: '2-digit' 
-                })}</p>
-            </body>
-            </html>
+                <div class="summary-card">
+                    <h4>Installment Collections</h4>
+                    <div class="amount">${this.safeFormatCurrency(data.installments.total_amount || 0)}</div>
+                    <p>${data.installments.transaction_count || 0} payments</p>
+                </div>
+                <div class="summary-card">
+                    <h4>Cash Sales</h4>
+                    <div class="amount">${this.safeFormatCurrency(data.cashSales.total_amount || 0)}</div>
+                    <p>${data.cashSales.transaction_count || 0} sales</p>
+                </div>
+            </div>
         `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
+        this.renderReport(this.wrapPanel('Monthly Collection Report', data.dateRange || 'Current Period', inner, data.shopName));
     }
 
     showOutstandingReport(data) {
         const hasErrors = data.error;
-        const errorMessage = hasErrors ? `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px;"><strong>Warning:</strong> ${data.error}</div>` : '';
-        
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Outstanding Amounts Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1, h2 { color: #333; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f8f9fa; font-weight: 600; }
-                    .amount { font-weight: bold; color: #dc3545; }
-                    .section { margin-bottom: 40px; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Outstanding Amounts Report</h1>
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-                
-                ${errorMessage}
-                
-                <div class="section">
-                    <h2>Installment Dues</h2>
-                    ${data.installmentDues.length > 0 ? `
-                        <table>
-                            <thead>
+        const errorMessage = hasErrors ? `<div class="alert alert-danger"><strong>Warning:</strong> ${data.error}</div>` : '';
+        const installmentDues = data.installmentDues || [];
+        const cashSaleDues = data.cashSaleDues || [];
+        if (installmentDues.length === 0 && cashSaleDues.length === 0 && !hasErrors) {
+            this.renderReport(this.emptyReport('Outstanding Amounts Report'));
+            return;
+        }
+        const inner = `
+            ${errorMessage}
+            <div class="section">
+                <h4>Installment Dues</h4>
+                ${installmentDues.length > 0 ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Customer Name</th>
+                                <th>Account</th>
+                                <th>Phone</th>
+                                <th>Start Date</th>
+                                <th>Remaining</th>
+                                <th>Overdue</th>
+                                <th>Last Payment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${installmentDues.map(due => `
                                 <tr>
-                                    <th>Customer Name</th>
-                                    <th>Phone Number</th>
-                                    <th>Delivery Date</th>
-                                    <th>Total Short Amount</th>
-                                    <th>Overdue Installments</th>
+                                    <td>${due.customer_name || 'N/A'}</td>
+                                    <td>${due.account_no || 'N/A'}</td>
+                                    <td>${due.phone || 'N/A'}</td>
+                                    <td>${this.safeFormatDate(due.start_date)}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
+                                    <td>${due.overdue_installments || 0}</td>
+                                    <td>${due.last_payment_date ? this.safeFormatDate(due.last_payment_date) : 'N/A'}</td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                ${data.installmentDues.map(due => `
-                                    <tr>
-                                        <td>${due.customer_name || 'N/A'}</td>
-                                        <td>${due.phone}</td>
-                                        <td>${this.safeFormatDate(due.delivery_date)}</td>
-                                        <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
-                                        <td>${due.overdue_installments || 0}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No outstanding installment dues</p>'}
-                </div>
-                
-                <div class="section">
-                    <h2>Cash Sale Dues & Overdue Payments</h2>
-                    ${data.cashSaleDues.length > 0 ? `
-                        <table>
-                            <thead>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>
+                ` : '<p class="text-muted">No outstanding installment dues</p>'}
+            </div>
+            <div class="section">
+                <h4>Cash Sale Dues</h4>
+                ${cashSaleDues.length > 0 ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Customer Name</th>
+                                <th>Account</th>
+                                <th>Phone</th>
+                                <th>Sale Date</th>
+                                <th>Total Due Amount</th>
+                                <th>Pending Sales</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${cashSaleDues.map(due => `
                                 <tr>
-                                    <th>Customer Name</th>
-                                    <th>Phone Number</th>
-                                    <th>Sale Date</th>
-                                    <th>Total Due Amount</th>
-                                    <th>Pending Sales</th>
+                                    <td>${due.customer_name}</td>
+                                    <td>${due.account_no || 'N/A'}</td>
+                                    <td>${due.phone}</td>
+                                    <td>${this.safeFormatDate(due.delivery_date)}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
+                                    <td>${due.pending_sales}</td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                ${data.cashSaleDues.map(due => `
-                                    <tr>
-                                        <td>${due.customer_name}</td>
-                                        <td>${due.phone}</td>
-                                        <td>${this.safeFormatDate(due.delivery_date)}</td>
-                                        <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
-                                        <td>${due.pending_sales}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No outstanding cash sale dues</p>'}
-                </div>
-            </body>
-            </html>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>
+                ` : '<p class="text-muted">No outstanding cash sale dues</p>'}
+            </div>
         `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
+        this.renderReport(this.wrapPanel('Outstanding Amounts Report', 'All dates', inner, data.shopName));
     }
 
     showCashSalesReport(data) {
-        const totalSales = data.reduce((sum, sale) => sum + (sale.agreed_price || 0), 0);
-        const totalReceived = data.reduce((sum, sale) => sum + (sale.received_price || 0), 0);
-        const totalDues = data.reduce((sum, sale) => sum + (sale.due_amount || 0), 0);
+        const rows = data || [];
+        const range = this.getLocalRange();
+        if (rows.length === 0) {
+            this.renderReport(this.emptyReport('Cash Sales Report'));
+            return;
+        }
+        const totalSales = rows.reduce((sum, sale) => sum + (sale.agreed_price || 0), 0);
+        const totalReceived = rows.reduce((sum, sale) => sum + (sale.received_price || 0), 0);
+        const totalDues = rows.reduce((sum, sale) => sum + (sale.due_amount || 0), 0);
+        const inner = `
+            <div class="summary-grid">
+                <div class="summary-card"><h4>Total Sales Value</h4><div class="amount">${this.safeFormatCurrency(totalSales)}</div></div>
+                <div class="summary-card"><h4>Amount Received</h4><div class="amount">${this.safeFormatCurrency(totalReceived)}</div></div>
+                <div class="summary-card"><h4>Outstanding Dues</h4><div class="amount">${this.safeFormatCurrency(totalDues)}</div></div>
+            </div>
+            <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Customer</th>
+                        <th>Item</th>
+                        <th>Engine No</th>
+                        <th>Agreed Price</th>
+                        <th>Received</th>
+                        <th>Due Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map(sale => `
+                        <tr>
+                            <td>${this.safeFormatDate(sale.sale_date)}</td>
+                            <td>${sale.customer_name}</td>
+                            <td>${sale.item_name}</td>
+                            <td>${sale.engine_no || 'N/A'}</td>
+                            <td>${this.safeFormatCurrency(sale.agreed_price)}</td>
+                            <td>${this.safeFormatCurrency(sale.received_price)}</td>
+                            <td>${this.safeFormatCurrency(sale.due_amount)}</td>
+                            <td>${this.safeCapitalize(sale.payment_status)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            </div>
+        `;
+        this.renderReport(this.wrapPanel('Cash Sales Report', `${range.start} to ${range.end}`, inner));
+    }
 
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Cash Sales Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1, h2 { color: #333; }
-                    .summary { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-                    .summary-item { text-align: center; }
-                    .amount { font-size: 20px; font-weight: bold; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                    th { background: #f8f9fa; font-weight: 600; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Cash Sales Report</h1>
-                <p><strong>Period:</strong> Current Month | <strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-                
-                <div class="summary">
-                    <div class="summary-item">
-                        <h3>Total Sales Value</h3>
-                        <div class="amount" style="color: #007bff;">${Utils.formatCurrency(totalSales)}</div>
-                    </div>
-                    <div class="summary-item">
-                        <h3>Amount Received</h3>
-                        <div class="amount" style="color: #28a745;">${Utils.formatCurrency(totalReceived)}</div>
-                    </div>
-                    <div class="summary-item">
-                        <h3>Outstanding Dues</h3>
-                        <div class="amount" style="color: #dc3545;">${Utils.formatCurrency(totalDues)}</div>
-                    </div>
+    showSupplierPaymentsReport(data) {
+        const rows = data || [];
+        const range = this.getLocalRange();
+        if (rows.length === 0) {
+            this.renderReport(this.emptyReport('Supplier Payments Report'));
+            return;
+        }
+        const totalPayments = rows.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+        const inner = `
+            <div class="summary-grid">
+                <div class="summary-card"><h4>Total Payments Made</h4><div class="amount">${this.safeFormatCurrency(totalPayments)}</div><p>${rows.length} transactions</p></div>
+            </div>
+            <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Supplier</th>
+                        <th>Amount</th>
+                        <th>Payment Method</th>
+                        <th>Reference No</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map(payment => `
+                        <tr>
+                            <td>${this.safeFormatDate(payment.payment_date)}</td>
+                            <td>${payment.supplier_name}</td>
+                            <td>${this.safeFormatCurrency(payment.amount)}</td>
+                            <td>${this.safeCapitalize(payment.payment_method)}</td>
+                            <td>${payment.reference_no || 'N/A'}</td>
+                            <td>${payment.notes || 'N/A'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            </div>
+        `;
+        this.renderReport(this.wrapPanel('Supplier Payments Report', `${range.start} to ${range.end}`, inner));
+    }
+
+    showExpenseReport(data) {
+        const expenses = (data && data.expenses) || [];
+        const expensesByType = (data && data.expensesByType) || [];
+        const range = this.getLocalRange();
+        if (expenses.length === 0) {
+            this.renderReport(this.emptyReport('Expense Report'));
+            return;
+        }
+        const totalExpenses = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+        const inner = `
+            <div class="summary-grid">
+                <div class="summary-card"><h4>Total Expenses</h4><div class="amount">${this.safeFormatCurrency(totalExpenses)}</div><p>${expenses.length} transactions</p></div>
+            </div>
+            <div class="section">
+                <h4>Expenses by Type</h4>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Expense Type</th>
+                            <th>Total Amount</th>
+                            <th>Transaction Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${expensesByType.map(type => `
+                            <tr>
+                                <td>${type.expense_type}</td>
+                                <td>${this.safeFormatCurrency(type.total_amount)}</td>
+                                <td>${type.transaction_count}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
                 </div>
-                
-                ${data.length > 0 ? `
-                    <table>
+            </div>
+            <div class="section">
+                <h4>Detailed Expenses</h4>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${expenses.map(expense => `
+                            <tr>
+                                <td>${this.safeFormatDate(expense.date)}</td>
+                                <td>${expense.expense_type}</td>
+                                <td>${this.safeFormatCurrency(expense.amount)}</td>
+                                <td>${expense.notes || 'N/A'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        `;
+        this.renderReport(this.wrapPanel('Expense Report', `${range.start} to ${range.end}`, inner));
+    }
+
+    showStockReport(data) {
+        const stockSummary = (data && data.stockSummary) || [];
+        const recentSales = (data && data.recentSales) || [];
+        const range = this.getLocalRange();
+        if (stockSummary.length === 0 && recentSales.length === 0) {
+            this.renderReport(this.emptyReport('Stock Report'));
+            return;
+        }
+        const inner = `
+            <div class="section">
+                <h4>Stock Summary</h4>
+                ${stockSummary.length > 0 ? `
+                    <div class="table-container">
+                    <table class="data-table">
                         <thead>
                             <tr>
+                                <th>Item Name</th>
+                                <th>Total Stock</th>
+                                <th>Sold</th>
+                                <th>Available</th>
+                                <th>Average Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${stockSummary.map(item => `
+                                <tr>
+                                    <td>${item.item_name}</td>
+                                    <td>${item.total_stock}</td>
+                                    <td>${item.sold_stock}</td>
+                                    <td>${item.available_stock}</td>
+                                    <td>${this.safeFormatCurrency(item.avg_price)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>
+                ` : '<p class="text-muted">No stock data available.</p>'}
+            </div>
+            <div class="section">
+                <h4>Sales in Selected Range</h4>
+                ${recentSales.length > 0 ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Sale Type</th>
                                 <th>Date</th>
                                 <th>Customer</th>
                                 <th>Item</th>
                                 <th>Engine No</th>
-                                <th>Agreed Price</th>
-                                <th>Received</th>
-                                <th>Due Amount</th>
-                                <th>Status</th>
+                                <th>Sale Price</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.map(sale => `
+                            ${recentSales.map(sale => `
                                 <tr>
-                                    <td>${Utils.formatDate(sale.sale_date)}</td>
+                                    <td>${this.safeCapitalize((sale.sale_type || '').replace('_', ' '))}</td>
+                                    <td>${this.safeFormatDate(sale.sale_date)}</td>
                                     <td>${sale.customer_name}</td>
                                     <td>${sale.item_name}</td>
-                                    <td>${sale.engine_no}</td>
-                                    <td>${Utils.formatCurrency(sale.agreed_price)}</td>
-                                    <td>${Utils.formatCurrency(sale.received_price)}</td>
-                                    <td>${Utils.formatCurrency(sale.due_amount)}</td>
-                                    <td>${Utils.capitalizeWords(sale.payment_status)}</td>
+                                    <td>${sale.engine_no || 'N/A'}</td>
+                                    <td>${this.safeFormatCurrency(sale.sale_price)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
-                ` : '<div style="text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px;"><h3 style="color: #6c757d;">No Data Found</h3><p style="color: #6c757d;">No cash sales found for the selected period.</p></div>'}
-            </body>
-            </html>
-        `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-    }
-
-    showSupplierPaymentsReport(data) {
-        const totalPayments = data.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Supplier Payments Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1 { color: #333; }
-                    .summary { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
-                    .total-amount { font-size: 24px; font-weight: bold; color: #dc3545; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f8f9fa; font-weight: 600; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Supplier Payments Report</h1>
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-                
-                <div class="summary">
-                    <h3>Total Payments Made</h3>
-                    <div class="total-amount">${Utils.formatCurrency(totalPayments)}</div>
-                    <p>${data.length} transactions</p>
-                </div>
-                
-                ${data.length > 0 ? `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Supplier</th>
-                                <th>Amount</th>
-                                <th>Payment Method</th>
-                                <th>Reference No</th>
-                                <th>Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${data.map(payment => `
-                                <tr>
-                                    <td>${Utils.formatDate(payment.payment_date)}</td>
-                                    <td>${payment.supplier_name}</td>
-                                    <td>${Utils.formatCurrency(payment.amount)}</td>
-                                    <td>${Utils.capitalizeWords(payment.payment_method)}</td>
-                                    <td>${payment.reference_no || 'N/A'}</td>
-                                    <td>${payment.notes || 'N/A'}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                ` : '<p>No supplier payments found for the current month.</p>'}
-            </body>
-            </html>
-        `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-    }
-
-    showExpenseReport(data) {
-        const totalExpenses = data.expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
-
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Expense Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1, h2 { color: #333; }
-                    .summary { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
-                    .total-amount { font-size: 24px; font-weight: bold; color: #dc3545; }
-                    .section { margin-bottom: 40px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f8f9fa; font-weight: 600; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Expense Report</h1>
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-                
-                <div class="summary">
-                    <h3>Total Expenses</h3>
-                    <div class="total-amount">${Utils.formatCurrency(totalExpenses)}</div>
-                    <p>${data.expenses.length} transactions</p>
-                </div>
-                
-                <div class="section">
-                    <h2>Expenses by Type</h2>
-                    ${data.expensesByType.length > 0 ? `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Expense Type</th>
-                                    <th>Total Amount</th>
-                                    <th>Transaction Count</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.expensesByType.map(type => `
-                                    <tr>
-                                        <td>${type.expense_type}</td>
-                                        <td>${Utils.formatCurrency(type.total_amount)}</td>
-                                        <td>${type.transaction_count}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No expenses found.</p>'}
-                </div>
-                
-                <div class="section">
-                    <h2>Detailed Expenses</h2>
-                    ${data.expenses.length > 0 ? `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Type</th>
-                                    <th>Amount</th>
-                                    <th>Notes</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.expenses.map(expense => `
-                                    <tr>
-                                        <td>${Utils.formatDate(expense.date)}</td>
-                                        <td>${expense.expense_type}</td>
-                                        <td>${Utils.formatCurrency(expense.amount)}</td>
-                                        <td>${expense.notes || 'N/A'}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No expenses found for the current month.</p>'}
-                </div>
-            </body>
-            </html>
-        `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-    }
-
-    showStockReport(data) {
-        const win = window.open('', '_blank');
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Stock Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h1, h2 { color: #333; }
-                    .section { margin-bottom: 40px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-                    th { background: #f8f9fa; font-weight: 600; }
-                    .print-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
-                    @media print { .print-btn { display: none; } }
-                </style>
-            </head>
-            <body>
-                <button class="print-btn" onclick="window.print()">Print Report</button>
-                <h1>Stock Report</h1>
-                <p><strong>Generated on:</strong> ${new Date().toLocaleDateString()}</p>
-                
-                <div class="section">
-                    <h2>Stock Summary</h2>
-                    ${data.stockSummary.length > 0 ? `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Item Name</th>
-                                    <th>Total Stock</th>
-                                    <th>Sold</th>
-                                    <th>Available</th>
-                                    <th>Average Price</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.stockSummary.map(item => `
-                                    <tr>
-                                        <td>${item.item_name}</td>
-                                        <td>${item.total_stock}</td>
-                                        <td>${item.sold_stock}</td>
-                                        <td>${item.available_stock}</td>
-                                        <td>${Utils.formatCurrency(item.avg_price)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No stock data available.</p>'}
-                </div>
-                
-                <div class="section">
-                    <h2>Recent Sales (Last 30 Days)</h2>
-                    ${data.recentSales.length > 0 ? `
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Sale Type</th>
-                                    <th>Date</th>
-                                    <th>Customer</th>
-                                    <th>Item</th>
-                                    <th>Engine No</th>
-                                    <th>Sale Price</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${data.recentSales.map(sale => `
-                                    <tr>
-                                        <td>${Utils.capitalizeWords(sale.sale_type.replace('_', ' '))}</td>
-                                        <td>${Utils.formatDate(sale.sale_date)}</td>
-                                        <td>${sale.customer_name}</td>
-                                        <td>${sale.item_name}</td>
-                                        <td>${sale.engine_no}</td>
-                                        <td>${Utils.formatCurrency(sale.sale_price)}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    ` : '<p>No recent sales found.</p>'}
-                </div>
-            </body>
-            </html>
-        `;
-        
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-    }
-    
-    async showDateRangeModal(title, description) {
-        return new Promise((resolve) => {
-            this.cleanupDateRangeModal();
-            this.dateRangeResolver = resolve;
-            
-            const now = new Date();
-            const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-            const defaultEnd = now.toISOString().split('T')[0];
-            
-            const modalHtml = `
-                <div id="reports-date-modal" class="modal" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:10000;">
-                    <div class="modal-content" style="background:#fff;border-radius:8px;padding:20px;width:90%;max-width:520px;max-height:85vh;overflow-y:auto;">
-                        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                            <h3 style="margin:0;"><i class="fas fa-calendar-alt"></i> ${title}</h3>
-                            <button class="modal-close" style="background:none;border:none;font-size:24px;cursor:pointer;" onclick="window.reports.resolveDateRange('cancel')">&times;</button>
-                        </div>
-                        <div class="modal-body">
-                            <p style="margin-bottom:16px;">${description}</p>
-                            <form id="date-range-form">
-                                <div class="form-group" style="margin-bottom:12px;">
-                                    <label class="form-label" style="display:block;margin-bottom:4px;font-weight:500;">Start Date</label>
-                                    <input type="date" name="start_date" class="form-input" value="${defaultStart}" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:12px;">
-                                    <label class="form-label" style="display:block;margin-bottom:4px;font-weight:500;">End Date</label>
-                                    <input type="date" name="end_date" class="form-input" value="${defaultEnd}" required style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;">
-                                </div>
-                                <div class="form-group" style="margin-bottom:12px;">
-                                    <label class="form-label" style="display:block;margin-bottom:6px;font-weight:500;">Quick Select</label>
-                                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                        <button type="button" class="btn btn-sm" style="padding:4px 10px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.setQuickDateRange('today')">Today</button>
-                                        <button type="button" class="btn btn-sm" style="padding:4px 10px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.setQuickDateRange('thisWeek')">This Week</button>
-                                        <button type="button" class="btn btn-sm" style="padding:4px 10px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.setQuickDateRange('thisMonth')">This Month</button>
-                                        <button type="button" class="btn btn-sm" style="padding:4px 10px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.setQuickDateRange('lastMonth')">Last Month</button>
-                                        <button type="button" class="btn btn-sm" style="padding:4px 10px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.setQuickDateRange('last3Months')">Last 3 Months</button>
-                                    </div>
-                                </div>
-                            </form>
-                        </div>
-                        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
-                            <button class="btn btn-secondary" style="padding:8px 16px;border:none;border-radius:4px;background:#6c757d;color:#fff;cursor:pointer;" onclick="window.reports.resolveDateRange('cancel')">Cancel</button>
-                            <button class="btn btn-primary" style="padding:8px 16px;border:none;border-radius:4px;background:#007bff;color:#fff;cursor:pointer;" onclick="window.reports.resolveDateRange('submit')">Generate</button>
-                        </div>
                     </div>
+                ` : '<p class="text-muted">No sales found for this period.</p>'}
+            </div>
+        `;
+        this.renderReport(this.wrapPanel('Stock Report', `${range.start} to ${range.end}`, inner));
+    }
+
+    async generateDailyCashBook() {
+        try {
+            this.safeShowLoading();
+            const range = this.getLocalRange();
+            const shopName = await this.getShopName();
+            const payments = await this.loadCollectionFromPayments(range.start, range.end);
+            const cashCollected = ReportsManager.sumPaymentsInRange(payments, range.start, range.end);
+            const cashSales = await this.safeQuery(`
+                SELECT sale_date as entry_date, received_price as amount, 'Cash Sale' as source,
+                       COALESCE(c.customer_name, 'Walk-in Customer') as party
+                FROM cash_sales cs
+                LEFT JOIN customers c ON cs.customer_id = c.id
+                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
+                  AND received_price > 0
+                ORDER BY cs.sale_date
+            `, [range.start, range.end], []);
+            const expenses = await this.safeQuery(`
+                SELECT e.date as entry_date, e.amount, et.name as source, e.notes as party
+                FROM expenses e
+                JOIN expense_types et ON e.expense_type_id = et.id
+                WHERE DATE(e.date) BETWEEN DATE(?) AND DATE(?)
+                ORDER BY e.date
+            `, [range.start, range.end], []);
+            const supplierPays = await this.safeQuery(`
+                SELECT sp.payment_date as entry_date, sp.amount, 'Supplier Payment' as source, s.supplier_name as party
+                FROM supplier_payments sp
+                JOIN suppliers s ON sp.supplier_id = s.id
+                WHERE DATE(sp.payment_date) BETWEEN DATE(?) AND DATE(?)
+                ORDER BY sp.payment_date
+            `, [range.start, range.end], []);
+            const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
+            const inflows = cashCollected + cashSales.reduce((s, r) => s + (r.amount || 0), 0);
+            const outflows = expenses.reduce((s, r) => s + (r.amount || 0), 0)
+                + supplierPays.reduce((s, r) => s + (r.amount || 0), 0);
+            if (inflows === 0 && outflows === 0) {
+                this.renderReport(this.emptyReport('Daily Cash Book'));
+                return;
+            }
+            const rows = [
+                ...paymentRows.map((p) => ({ date: p.payment_date, source: 'Installment', party: p.receipt_no || '', amount: p.amount, kind: 'in' })),
+                ...cashSales.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'in' })),
+                ...expenses.map((r) => ({ date: r.entry_date, source: r.source, party: r.party || '', amount: r.amount, kind: 'out' })),
+                ...supplierPays.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'out' }))
+            ].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+            const inner = `
+                <div class="summary-grid">
+                    <div class="summary-card"><h4>Inflows</h4><div class="amount">${this.safeFormatCurrency(inflows)}</div></div>
+                    <div class="summary-card"><h4>Outflows</h4><div class="amount">${this.safeFormatCurrency(outflows)}</div></div>
+                    <div class="summary-card"><h4>Net</h4><div class="amount">${this.safeFormatCurrency(inflows - outflows)}</div></div>
+                </div>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Source</th>
+                            <th>Party</th>
+                            <th>In</th>
+                            <th>Out</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r) => `
+                            <tr>
+                                <td>${this.safeFormatDate(r.date)}</td>
+                                <td>${r.source}</td>
+                                <td>${r.party || 'N/A'}</td>
+                                <td>${r.kind === 'in' ? this.safeFormatCurrency(r.amount) : ''}</td>
+                                <td>${r.kind === 'out' ? this.safeFormatCurrency(r.amount) : ''}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
                 </div>
             `;
-            
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-        });
+            this.renderReport(this.wrapPanel('Daily Cash Book', `${range.start} to ${range.end}`, inner, shopName));
+        } catch (error) {
+            console.error('Error generating cash book:', error);
+            this.safeShowNotification('Failed to generate daily cash book', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
     }
-    
-    resolveDateRange(action) {
-        if (action !== 'submit') {
-            if (this.dateRangeResolver) {
-                this.dateRangeResolver(null);
+
+    async generateOverdueAging() {
+        try {
+            this.safeShowLoading();
+            const shopName = await this.getShopName();
+            const today = this.formatDateForInput(new Date());
+            const rows = await this.safeQuery(`
+                SELECT
+                    COALESCE(c.customer_name, 'N/A') as customer_name,
+                    COALESCE(c.account_no, 'N/A') as account_no,
+                    COALESCE(c.phone, 'N/A') as phone,
+                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 1 AND 30
+                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_1_30,
+                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 31 AND 60
+                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_31_60,
+                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 61 AND 90
+                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_61_90,
+                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) > 90
+                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_90_plus
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                JOIN customers c ON cp.customer_id = c.id
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                  AND cp.status != 'deleted'
+                  AND DATE(i.due_date) < DATE(?)
+                  AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
+                GROUP BY c.id, c.customer_name, c.account_no, c.phone
+                ORDER BY (bucket_1_30 + bucket_31_60 + bucket_61_90 + bucket_90_plus) DESC
+            `, [today, today, today, today, today], []);
+            if (!rows.length) {
+                this.renderReport(this.emptyReport('Overdue Aging'));
+                return;
             }
-            this.dateRangeResolver = null;
-            this.cleanupDateRangeModal();
-            return;
-        }
-        
-        const form = document.getElementById('date-range-form');
-        if (!form) {
-            if (this.dateRangeResolver) this.dateRangeResolver(null);
-            this.dateRangeResolver = null;
-            this.cleanupDateRangeModal();
-            return;
-        }
-        
-        const formData = new FormData(form);
-        const startDate = formData.get('start_date');
-        const endDate = formData.get('end_date');
-        
-        if (!startDate || !endDate) {
-            alert('Please select both start and end dates');
-            return;
-        }
-        
-        if (new Date(startDate) > new Date(endDate)) {
-            alert('Start date must be before end date');
-            return;
-        }
-        
-        if (this.dateRangeResolver) {
-            this.dateRangeResolver({ startDate, endDate });
-        }
-        this.dateRangeResolver = null;
-        this.cleanupDateRangeModal();
-    }
-    
-    cleanupDateRangeModal() {
-        const modal = document.getElementById('reports-date-modal');
-        if (modal) {
-            modal.remove();
+            const inner = `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Account</th>
+                            <th>Phone</th>
+                            <th>1-30 Days</th>
+                            <th>31-60 Days</th>
+                            <th>61-90 Days</th>
+                            <th>90+ Days</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r) => `
+                            <tr>
+                                <td>${r.customer_name}</td>
+                                <td>${r.account_no}</td>
+                                <td>${r.phone}</td>
+                                <td>${this.safeFormatCurrency(r.bucket_1_30)}</td>
+                                <td>${this.safeFormatCurrency(r.bucket_31_60)}</td>
+                                <td>${this.safeFormatCurrency(r.bucket_61_90)}</td>
+                                <td>${this.safeFormatCurrency(r.bucket_90_plus)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Overdue Aging', today, inner, shopName));
+        } catch (error) {
+            console.error('Error generating overdue aging:', error);
+            this.safeShowNotification('Failed to generate overdue aging', 'error');
+        } finally {
+            this.safeHideLoading();
         }
     }
-    
+
+    async generateCustomerStatement() {
+        try {
+            this.safeShowLoading();
+            const customerId = await this.promptCustomerId();
+            if (!customerId) {
+                return;
+            }
+            const shopName = await this.getShopName();
+            const customer = await Database.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+            if (!customer) {
+                this.safeShowNotification('Customer not found', 'error');
+                return;
+            }
+            const purchases = await this.safeQuery(`
+                SELECT cp.id, cp.start_date, cp.sale_price, cp.total_amount, p.item_name
+                FROM customer_purchases cp
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE cp.customer_id = ?
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                ORDER BY cp.start_date
+            `, [customerId], []);
+            const payments = await this.safeQuery(`
+                SELECT payment_date, amount, receipt_no, notes, type
+                FROM payments
+                WHERE customer_id = ?
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+                ORDER BY payment_date
+            `, [customerId], []);
+            const remainingRows = await this.safeQuery(`
+                SELECT SUM(COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) as remaining
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                WHERE cp.customer_id = ?
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+            `, [customerId], [{ remaining: 0 }]);
+            const remaining = (remainingRows[0] && remainingRows[0].remaining) || 0;
+            const inner = `
+                <p><strong>Customer:</strong> ${customer.customer_name || ''} &nbsp;
+                   <strong>Account:</strong> ${customer.account_no || 'N/A'} &nbsp;
+                   <strong>Phone:</strong> ${customer.phone || 'N/A'}</p>
+                <p><strong>Remaining:</strong> ${this.safeFormatCurrency(remaining)}</p>
+                <div class="section">
+                    <h4>Purchases</h4>
+                    ${purchases.length ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Item</th><th>Sale Price</th><th>Total</th></tr></thead>
+                        <tbody>
+                            ${purchases.map((p) => `
+                                <tr>
+                                    <td>${this.safeFormatDate(p.start_date)}</td>
+                                    <td>${p.item_name || 'N/A'}</td>
+                                    <td>${this.safeFormatCurrency(p.sale_price)}</td>
+                                    <td>${this.safeFormatCurrency(p.total_amount)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>` : '<p class="text-muted">No purchases</p>'}
+                </div>
+                <div class="section">
+                    <h4>Payments</h4>
+                    ${payments.length ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Amount</th><th>Receipt</th><th>Type</th><th>Notes</th></tr></thead>
+                        <tbody>
+                            ${payments.map((p) => `
+                                <tr>
+                                    <td>${this.safeFormatDate(p.payment_date)}</td>
+                                    <td>${this.safeFormatCurrency(p.amount)}</td>
+                                    <td>${p.receipt_no || 'N/A'}</td>
+                                    <td>${p.type || 'payment'}</td>
+                                    <td>${p.notes || ''}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>` : '<p class="text-muted">No payments</p>'}
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Customer Statement', customer.customer_name, inner, shopName));
+        } catch (error) {
+            console.error('Error generating customer statement:', error);
+            this.safeShowNotification('Failed to generate customer statement', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async promptCustomerId() {
+        const customers = await this.safeQuery(
+            'SELECT id, customer_name, account_no, phone FROM customers ORDER BY customer_name',
+            [],
+            []
+        );
+        if (!customers.length) {
+            this.safeShowNotification('No customers found', 'error');
+            return null;
+        }
+        const listed = customers.slice(0, 20).map((c) => `${c.id}: ${c.customer_name} (${c.account_no || c.phone || '-'})`).join('\n');
+        const entered = typeof window !== 'undefined' && window.prompt
+            ? window.prompt(`Enter customer id:\n${listed}${customers.length > 20 ? '\n...' : ''}`)
+            : null;
+        if (!entered) return null;
+        const id = parseInt(entered, 10);
+        return Number.isFinite(id) ? id : null;
+    }
+
+    async generateProfitSnapshot() {
+        try {
+            this.safeShowLoading();
+            const range = this.getLocalRange();
+            const shopName = await this.getShopName();
+            const installmentProfit = await this.safeQuery(`
+                SELECT COALESCE(SUM(cp.sale_price - cp.purchase_price), 0) as profit
+                FROM customer_purchases cp
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+            `, [range.start, range.end], [{ profit: 0 }]);
+            const cashProfit = await this.safeQuery(`
+                SELECT COALESCE(SUM(cs.agreed_price - COALESCE(p.purchase_price, 0)), 0) as profit
+                FROM cash_sales cs
+                JOIN stock s ON cs.stock_id = s.id
+                JOIN products p ON s.product_id = p.id
+                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
+            `, [range.start, range.end], [{ profit: 0 }]);
+            const discounts = await this.safeQuery(`
+                SELECT COALESCE(SUM(d.amount), 0) as total
+                FROM discounts d
+                JOIN customer_purchases cp ON d.purchase_id = cp.id
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
+            `, [range.start, range.end], [{ total: 0 }]);
+            const expenses = await this.safeQuery(`
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM expenses
+                WHERE DATE(date) BETWEEN DATE(?) AND DATE(?)
+            `, [range.start, range.end], [{ total: 0 }]);
+            const inst = (installmentProfit[0] && installmentProfit[0].profit) || 0;
+            const cash = (cashProfit[0] && cashProfit[0].profit) || 0;
+            const disc = (discounts[0] && discounts[0].total) || 0;
+            const exp = (expenses[0] && expenses[0].total) || 0;
+            const net = inst + cash - disc - exp;
+            if (inst === 0 && cash === 0 && disc === 0 && exp === 0) {
+                this.renderReport(this.emptyReport('Profit Snapshot'));
+                return;
+            }
+            const inner = `
+                <div class="summary-grid">
+                    <div class="summary-card"><h4>Installment Profit</h4><div class="amount">${this.safeFormatCurrency(inst)}</div></div>
+                    <div class="summary-card"><h4>Cash Sale Profit</h4><div class="amount">${this.safeFormatCurrency(cash)}</div></div>
+                    <div class="summary-card"><h4>Discounts</h4><div class="amount">${this.safeFormatCurrency(disc)}</div></div>
+                    <div class="summary-card"><h4>Expenses</h4><div class="amount">${this.safeFormatCurrency(exp)}</div></div>
+                    <div class="summary-card"><h4>Net Profit</h4><div class="amount">${this.safeFormatCurrency(net)}</div></div>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Profit Snapshot', `${range.start} to ${range.end}`, inner, shopName));
+        } catch (error) {
+            console.error('Error generating profit snapshot:', error);
+            this.safeShowNotification('Failed to generate profit snapshot', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
     // Enhanced error handling for database queries
     async safeQuery(sql, params = [], fallback = []) {
         try {
@@ -1360,31 +1384,24 @@ class ReportsManager {
     }
 }
 
-window.ReportsManager = ReportsManager;
-
-// Ensure a global reports instance exists even if App initialization hasn't assigned it yet
-if (!window.reports) {
-    try {
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { ReportsManager };
+} else {
+    window.ReportsManager = ReportsManager;
+    if (!window.reports) {
         window.reports = new ReportsManager();
-        console.log('⚠️ ReportsManager initialized as standalone (fallback).');
-    } catch (e) {
-        console.error('Failed to initialize ReportsManager fallback:', e);
     }
+    window.generateReport = async function(type) {
+        try {
+            if (!window.reports) {
+                window.reports = new ReportsManager();
+            }
+            await window.reports.generate(type);
+        } catch (err) {
+            console.error('Report generation error:', err);
+            if (typeof app !== 'undefined' && app.showNotification) {
+                app.showNotification(`Failed to generate report: ${err.message}`, 'error');
+            }
+        }
+    };
 }
-
-// Safer global wrapper so HTML buttons don't break even if reports instance changes
-window.generateReport = async function(type) {
-    try {
-        if (!window.reports) {
-            window.reports = new ReportsManager();
-        }
-        await window.reports.generateReportWithDateRange(type);
-    } catch (err) {
-        console.error('Report generation error:', err);
-        if (typeof app !== 'undefined' && app.showNotification) {
-            app.showNotification(`Failed to generate report: ${err.message}`, 'error');
-        } else {
-            alert(`Failed to generate report: ${err.message}`);
-        }
-    }
-};

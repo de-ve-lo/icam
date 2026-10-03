@@ -403,23 +403,20 @@
                     <h2><i class="fas fa-chart-bar"></i> Reports</h2>
                 </div>
                 
-                <div class="reports-date-controls" style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-                    <h3 style="margin-bottom: 15px; color: #333;"><i class="fas fa-calendar-alt"></i> Date Range Selection</h3>
-                    <div class="date-controls" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 15px; align-items: end;">
+                <div class="reports-date-controls">
+                    <h3><i class="fas fa-calendar-alt"></i> Date Range Selection</h3>
+                    <div class="date-controls">
                         <div class="form-group">
-                            <label class="form-label" style="font-weight: 500;">Start Date</label>
-                            <input type="date" id="reports-start-date" class="form-input" 
-                                   value="" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            <label class="form-label">Start Date</label>
+                            <input type="date" id="reports-start-date" class="form-input" value="">
                         </div>
                         <div class="form-group">
-                            <label class="form-label" style="font-weight: 500;">End Date</label>
-                            <input type="date" id="reports-end-date" class="form-input" 
-                                   value="" style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            <label class="form-label">End Date</label>
+                            <input type="date" id="reports-end-date" class="form-input" value="">
                         </div>
                         <div class="form-group">
-                            <label class="form-label" style="font-weight: 500;">Quick Select</label>
-                            <select id="reports-quick-select" class="form-input" 
-                                    style="border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
+                            <label class="form-label">Quick Select</label>
+                            <select id="reports-quick-select" class="form-input">
                                 <option value="">Select Range...</option>
                                 <option value="today">Today</option>
                                 <option value="yesterday">Yesterday</option>
@@ -433,52 +430,67 @@
                             </select>
                         </div>
                         <div class="form-group">
-                            <button id="reset-date-range-btn" class="btn btn-secondary" 
-                                    style="background: #6c757d; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer;">
+                            <button id="reset-date-range-btn" class="btn btn-secondary" type="button">
                                 <i class="fas fa-undo"></i> Reset
                             </button>
                         </div>
                     </div>
-                    <p class="text-muted" style="margin-top: 10px; font-size: 14px;">Select a date range to filter all reports. Leave blank to use current month data.</p>
+                    <p class="text-muted">Select a date range to filter all reports. Leave blank to use current month data.</p>
                 </div>
                 
                 <div class="reports-grid">
                     <div class="report-card">
                         <h3>Monthly Collection Report</h3>
                         <p>Installment and cash sale collections</p>
-<button class="btn btn-primary" onclick="window.generateReport('monthly')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('monthly')">Generate</button>
                     </div>
-                    
                     <div class="report-card">
                         <h3>Customer Outstanding Report</h3>
                         <p>All pending amounts across modules</p>
-<button class="btn btn-primary" onclick="window.generateReport('outstanding')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('outstanding')">Generate</button>
                     </div>
-                    
                     <div class="report-card">
                         <h3>Cash Sales Report</h3>
                         <p>Cash transaction summary</p>
-<button class="btn btn-primary" onclick="window.generateReport('cashsales')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('cashsales')">Generate</button>
                     </div>
-                    
                     <div class="report-card">
                         <h3>Supplier Payments Report</h3>
                         <p>Payments made to suppliers</p>
-<button class="btn btn-primary" onclick="window.generateReport('supplier')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('supplier')">Generate</button>
                     </div>
-                    
                     <div class="report-card">
                         <h3>Expense Report</h3>
                         <p>Business expenses breakdown</p>
-<button class="btn btn-primary" onclick="window.generateReport('expense')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('expense')">Generate</button>
                     </div>
-                    
                     <div class="report-card">
                         <h3>Stock Report</h3>
                         <p>Inventory and sales status</p>
-<button class="btn btn-primary" onclick="window.generateReport('stock')">Generate</button>
+                        <button class="btn btn-primary" onclick="window.reports.generate('stock')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Daily Cash Book</h3>
+                        <p>Inflows and outflows for the selected range</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('cashbook')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Overdue Aging</h3>
+                        <p>Outstanding dues by 30/60/90 day buckets</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('aging')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Customer Statement</h3>
+                        <p>One printable account view</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('statement')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Profit Snapshot</h3>
+                        <p>Sales profit minus discounts and expenses</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('profit')">Generate</button>
                     </div>
                 </div>
+                <div id="reports-output" class="reports-output"></div>
             </section>
         </main>
     </div>
