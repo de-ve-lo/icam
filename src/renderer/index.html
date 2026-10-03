@@ -41,9 +41,16 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
+                <button id="hamburger-btn" class="btn btn-secondary hamburger" type="button" aria-label="Toggle menu">
+                    <i class="fas fa-bars"></i>
+                </button>
                 <div class="logo">
                     <i class="fas fa-calculator"></i>
                     <h1 id="header-shop-name">Installment Management System</h1>
+                </div>
+                <div class="global-search">
+                    <input type="search" id="global-search" class="form-input" placeholder="Search customers or stock" autocomplete="off">
+                    <div id="global-search-results" class="global-search-results hidden"></div>
                 </div>
                     <div class="header-actions">
                         <button id="calculator-btn" class="btn btn-primary" title="Open Installment Calculator">
@@ -67,6 +74,7 @@
             </div>
         </header>
 
+        <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
             <ul class="nav-menu">

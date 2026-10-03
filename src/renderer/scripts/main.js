@@ -85,6 +85,35 @@ class App {
             pickLogoBtn.addEventListener('click', () => this.pickShopLogo());
         }
 
+        const hamburger = document.getElementById('hamburger-btn');
+        const sidebar = document.querySelector('.sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        const closeSidebar = () => {
+            if (sidebar) sidebar.classList.remove('open');
+            if (backdrop) backdrop.classList.add('hidden');
+        };
+        if (hamburger && sidebar) {
+            hamburger.addEventListener('click', () => {
+                sidebar.classList.toggle('open');
+                if (backdrop) backdrop.classList.toggle('hidden', !sidebar.classList.contains('open'));
+            });
+        }
+        if (backdrop) backdrop.addEventListener('click', closeSidebar);
+        document.querySelectorAll('.nav-link').forEach((link) => {
+            link.addEventListener('click', closeSidebar);
+        });
+
+        const searchInput = document.getElementById('global-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', this.debounce((e) => this.runGlobalSearch(e.target.value), 250));
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') this.hideGlobalSearch();
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.global-search')) this.hideGlobalSearch();
+        });
+
         // Modal close handlers
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) {
@@ -529,7 +558,7 @@ class App {
                             </ul>
                             <p><strong>The system will restart as brand new.</strong></p>
                         </div>
-                        <div class="form-group" style="margin-top: 20px;">
+                        <div class="form-group mt-4">
                             <label class="form-label">Type "RESET" to confirm:</label>
                             <input type="text" id="reset-confirmation" class="form-input" placeholder="Type RESET here">
                         </div>
@@ -672,6 +701,72 @@ class App {
         if (window.auth) window.auth.requireAdmin();
         const result = await window._ipcRenderer.invoke('shop-logo-pick');
         if (result && result.ok) this.showNotification('Logo updated', 'success');
+    }
+
+    hideGlobalSearch() {
+        const box = document.getElementById('global-search-results');
+        if (box) {
+            box.classList.add('hidden');
+            box.innerHTML = '';
+        }
+    }
+
+    async runGlobalSearch(term) {
+        const q = String(term || '').trim();
+        const box = document.getElementById('global-search-results');
+        if (!box) return;
+        if (q.length < 2) {
+            this.hideGlobalSearch();
+            return;
+        }
+        try {
+            const { customers, stock } = await Database.globalSearch(q);
+            const items = [];
+            (customers || []).forEach((c) => {
+                items.push(`<button type="button" class="global-search-item" data-kind="customer" data-id="${c.id}">
+                    <strong>${c.customer_name || c.account_no}</strong>
+                    <small>${c.account_no || ''} ${c.phone || ''}</small>
+                </button>`);
+            });
+            (stock || []).forEach((s) => {
+                const ident = s.imei || s.serial_no || s.engine_no || s.chassis_no || s.reg_no || '';
+                items.push(`<button type="button" class="global-search-item" data-kind="stock" data-id="${s.id}">
+                    <strong>${s.item_name || 'Stock'}</strong>
+                    <small>${ident}</small>
+                </button>`);
+            });
+            if (!items.length) {
+                box.innerHTML = '<div class="global-search-item">No matches</div>';
+            } else {
+                box.innerHTML = items.join('');
+                box.querySelectorAll('.global-search-item[data-kind]').forEach((btn) => {
+                    btn.addEventListener('click', () => this.openGlobalSearchResult(btn.dataset.kind, btn.dataset.id));
+                });
+            }
+            box.classList.remove('hidden');
+        } catch (e) {
+            console.error('Global search failed:', e);
+            this.hideGlobalSearch();
+        }
+    }
+
+    async openGlobalSearchResult(kind, id) {
+        this.hideGlobalSearch();
+        const searchInput = document.getElementById('global-search');
+        if (searchInput) searchInput.value = '';
+        if (kind === 'customer') {
+            this.navigateToSection('installments');
+            const customer = await Database.get('SELECT * FROM customers WHERE id = ?', [Number(id)]);
+            if (customer && this.installments) {
+                this.installments.searchResultCustomers = [customer];
+                await this.installments.showCustomerDetails(customer);
+            }
+            return;
+        }
+        if (kind === 'stock') {
+            this.navigateToSection('stock');
+            if (this.stock && this.stock.edit) await this.stock.edit(id);
+        }
     }
 
     formatCurrency(amount) {

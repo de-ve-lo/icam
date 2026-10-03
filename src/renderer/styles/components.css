@@ -29,7 +29,7 @@
     max-height: 90vh;
     overflow-y: auto;
     position: relative;
-    animation: modalSlideIn 0.3s ease;
+    animation: modalSlideIn 200ms ease;
 }
 
 /* Size helpers */
@@ -685,9 +685,198 @@
     border-top: 1px solid var(--border-color);
 }
 
+.search-results-modal {
+    width: 95vw;
+    max-width: 1200px;
+    height: 90vh;
+    max-height: none;
+}
+
+.search-results-body {
+    height: calc(90vh - 120px);
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.search-results-info {
+    margin-bottom: 1.25rem;
+    padding: 0.75rem 1rem;
+    background: var(--background-color);
+    border-radius: var(--border-radius);
+    border-left: 4px solid var(--primary-color);
+}
+
+.search-results-info p {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.results-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.search-results-modal .result-item {
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.result-summary-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+}
+
+.customer-basic-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.customer-basic-name {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.customer-basic-name i {
+    font-size: 1.25rem;
+    color: var(--primary-color);
+}
+
+.customer-basic-meta {
+    display: flex;
+    gap: 1.25rem;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.result-summary-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.result-summary-actions .btn {
+    min-width: 100px;
+}
+
+.search-results-modal .result-details {
+    padding: 1.25rem;
+    background: var(--card-background);
+    border-top: 1px solid var(--border-color);
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.loading-placeholder-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 2.5rem;
+    color: var(--text-secondary);
+}
+
+.installments-full {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+}
+
+.installments-full-header {
+    position: sticky;
+    top: 0;
+    background: var(--card-background);
+    z-index: 10;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.installments-full-header h4 {
+    margin: 0;
+    padding: 0.75rem;
+    background: var(--background-color);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.installments-full .data-table {
+    font-size: 0.8125rem;
+}
+
+.installments-full thead {
+    position: sticky;
+    top: 45px;
+    background: var(--card-background);
+    z-index: 5;
+}
+
+.row-paid {
+    background: #ecfdf5;
+}
+
+.row-short {
+    background: #fef2f2;
+}
+
+.status-pill {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.status-pill-paid {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-pill-short {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.status-pill-upcoming {
+    background: #e0f2fe;
+    color: #075985;
+}
+
+.overdue-shift {
+    color: var(--primary-color);
+}
+
+.card-footer {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.discount-info {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--background-color);
+    border-radius: 4px;
+}
+
+.purchase-details h3 {
+    margin-top: 0;
+}
+
 .result-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    text-align: center;
+    padding: 0.75rem;
+    background: var(--background-color);
+    border-radius: var(--border-radius);
 }
 
 .loading-placeholder {

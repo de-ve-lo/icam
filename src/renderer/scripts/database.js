@@ -164,6 +164,24 @@ class Database {
         );
     }
 
+    static async globalSearch(searchTerm) {
+        const like = `%${searchTerm}%`;
+        const customers = await this.query(`
+            SELECT id, customer_name, account_no, phone, cnic_no, 'customer' as result_type
+            FROM customers
+            WHERE customer_name LIKE ? OR account_no LIKE ? OR phone LIKE ? OR cnic_no LIKE ?
+            LIMIT 8
+        `, [like, like, like, like]);
+        const stock = await this.query(`
+            SELECT s.id, p.item_name, s.engine_no, s.chassis_no, s.imei, s.serial_no, s.reg_no, 'stock' as result_type
+            FROM stock s
+            JOIN products p ON p.id = s.product_id
+            WHERE s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.imei LIKE ? OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR p.item_name LIKE ?
+            LIMIT 8
+        `, [like, like, like, like, like, like]);
+        return { customers: customers || [], stock: stock || [] };
+    }
+
     static async searchCustomersExtended(searchTerm) {
         const like = `%${searchTerm}%`;
         return await this.query(`

@@ -70,55 +70,55 @@ class InstallmentManager {
         this.searchResultCustomers = customers;
 
         const modalHtml = `
-            <div class="modal" style="z-index: 10000;">
-                <div class="modal-content" style="width: 95vw; max-width: 1200px; height: 90vh; max-height: none;">
+            <div class="modal">
+                <div class="modal-content modal-xl search-results-modal">
                     <div class="modal-header">
                         <h3><i class="fas fa-search"></i> Search Results (${customers.length} found)</h3>
                         <button class="modal-close">&times;</button>
                     </div>
-                    <div class="modal-body" style="height: calc(90vh - 120px); overflow-y: auto; padding: 16px;">
-                        <div class="search-results-info" style="margin-bottom: 20px; padding: 12px; background: #e7f3ff; border-radius: 6px; border-left: 4px solid #007bff;">
-                            <p style="margin: 0; color: #0056b3;">
-                                <i class="fas fa-info-circle"></i> 
-                                <strong>Found ${customers.length} customer(s) matching your search.</strong> 
+                    <div class="modal-body search-results-body">
+                        <div class="search-results-info">
+                            <p>
+                                <i class="fas fa-info-circle"></i>
+                                <strong>Found ${customers.length} customer(s) matching your search.</strong>
                                 Click on any customer below to expand their installment details, or use "Select Customer" to load them in the main view.
                             </p>
                         </div>
-                        <div class="results-list-container" style="display: flex; flex-direction: column; gap: 16px;">
+                        <div class="results-list-container">
                             ${customers.map((customer, index) => `
-                                <div class="result-item" style="border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-                                    <div class="result-summary" onclick="app.installments.toggleCustomerResult(${index})" style="cursor: pointer; padding: 16px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); transition: background 0.3s ease;" onmouseover="this.style.background='linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%)'" onmouseout="this.style.background='linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)'">
-                                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                                            <div class="customer-basic-info" style="flex: 1;">
-                                                <div style="display: flex; flex-direction: column; gap: 8px;">
-                                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                                        <i class="fas fa-user-circle" style="font-size: 20px; color: #007bff;"></i>
-                                                        <strong style="color: #333; font-size: 18px;">${customer.account_no} - ${customer.customer_name || 'N/A'}</strong>
+                                <div class="result-item">
+                                    <div class="result-summary" onclick="app.installments.toggleCustomerResult(${index})">
+                                        <div class="result-summary-row">
+                                            <div class="customer-basic-info">
+                                                <div class="customer-basic-stack">
+                                                    <div class="customer-basic-name">
+                                                        <i class="fas fa-user-circle"></i>
+                                                        <strong>${customer.account_no} - ${customer.customer_name || 'N/A'}</strong>
                                                     </div>
-                                                    <div style="display: flex; gap: 20px; color: #666; font-size: 14px;">
+                                                    <div class="customer-basic-meta">
                                                         <span><i class="fas fa-id-card"></i> CNIC: ${customer.cnic_no}</span>
                                                         <span><i class="fas fa-phone"></i> ${customer.phone}</span>
                                                     </div>
-                                                    <div style="color: #666; font-size: 14px;">
+                                                    <div class="customer-basic-meta">
                                                         <i class="fas fa-map-marker-alt"></i> ${customer.address}
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                                                <button class="btn btn-sm btn-primary expand-btn" id="expand-btn-${index}" style="min-width: 100px;">
+                                            <div class="result-summary-actions">
+                                                <button class="btn btn-sm btn-primary expand-btn" id="expand-btn-${index}">
                                                     <i class="fas fa-chevron-down"></i> Expand
                                                 </button>
-                                                <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); app.installments.selectCustomerAndClose(${customer.id});" style="min-width: 100px;">
+                                                <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); app.installments.selectCustomerAndClose(${customer.id});">
                                                     <i class="fas fa-user-check"></i> Select
                                                 </button>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="result-details" id="result-details-${index}" style="display: none; padding: 20px; background: white; border-top: 1px solid #ddd; max-height: 60vh; overflow-y: auto;">
-                                        <div class="loading-placeholder" style="text-align: center; padding: 40px; color: #666;">
-                                            <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
-                                                <i class="fas fa-spinner fa-spin" style="font-size: 24px;"></i>
-                                                <span style="font-size: 16px;">Loading installment schedule...</span>
+                                    <div class="result-details hidden" id="result-details-${index}">
+                                        <div class="loading-placeholder">
+                                            <div class="loading-placeholder-inner">
+                                                <i class="fas fa-spinner fa-spin"></i>
+                                                <span>Loading installment schedule...</span>
                                             </div>
                                         </div>
                                     </div>
@@ -138,9 +138,8 @@ class InstallmentManager {
         const detailsDiv = document.getElementById(`result-details-${index}`);
         const expandBtn = document.getElementById(`expand-btn-${index}`);
 
-        if (detailsDiv.style.display === 'none') {
-            // Show details
-            detailsDiv.style.display = 'block';
+        if (detailsDiv.classList.contains('hidden')) {
+            detailsDiv.classList.remove('hidden');
             expandBtn.innerHTML = '<i class="fas fa-chevron-up"></i> Collapse';
 
             // Load installments if not already loaded
@@ -158,8 +157,7 @@ class InstallmentManager {
                 }
             }
         } else {
-            // Hide details
-            detailsDiv.style.display = 'none';
+            detailsDiv.classList.add('hidden');
             expandBtn.innerHTML = '<i class="fas fa-chevron-down"></i> Expand';
         }
     }
@@ -192,57 +190,57 @@ class InstallmentManager {
         });
 
         return `
-            <div class="customer-result-details" style="max-height: 100%; overflow-y: auto;">
-                <div class="customer-info-compact" style="background: #f8f9fa; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
-                    <div class="info-row" style="display: flex; gap: 20px; margin-bottom: 8px;">
+            <div class="customer-result-details">
+                <div class="customer-info-compact">
+                    <div class="info-row">
                         <div><strong><i class="fas fa-user"></i> Customer:</strong> ${customer.account_no} - ${customer.customer_name || 'N/A'}</div>
                         <div><strong><i class="fas fa-map-marker-alt"></i> Address:</strong> ${customer.address}</div>
                         <div><strong><i class="fas fa-phone"></i> Phone:</strong> ${customer.phone}</div>
                     </div>
                 </div>
-                <div class="installments-full" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px;">
-                    <div style="position: sticky; top: 0; background: white; z-index: 10; border-bottom: 1px solid #ddd;">
-                        <h4 style="margin: 0; padding: 12px; background: #f1f3f4; font-size: 14px; font-weight: 600;">
+                <div class="installments-full">
+                    <div class="installments-full-header">
+                        <h4>
                             <i class="fas fa-credit-card"></i> Installment Schedule (${displayRows.length} installments)
                         </h4>
                     </div>
-                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-                        <thead style="position: sticky; top: 45px; background: white; z-index: 5;">
-                            <tr style="background: #f8f9fa; border-bottom: 2px solid #ddd;">
-                                <th style="padding: 8px; text-align: left; border-right: 1px solid #ddd;">#</th>
-                                <th style="padding: 8px; text-align: left; border-right: 1px solid #ddd;">Due Date</th>
-                                <th style="padding: 8px; text-align: right; border-right: 1px solid #ddd;">Amount</th>
-                                <th style="padding: 8px; text-align: right; border-right: 1px solid #ddd;">Paid</th>
-                                <th style="padding: 8px; text-align: center; border-right: 1px solid #ddd;">Status</th>
-                                <th style="padding: 8px; text-align: right;">Remaining</th>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Due Date</th>
+                                <th class="text-right">Amount</th>
+                                <th class="text-right">Paid</th>
+                                <th class="text-center">Status</th>
+                                <th class="text-right">Remaining</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${displayRows.map(i => `
-                                <tr style="border-bottom: 1px solid #eee; ${i.computedStatus === 'paid' ? 'background: #f0f8f0;' : ''} ${i.computedStatus === 'short' ? 'background: #fff3f3;' : ''}">
-                                    <td style="padding: 8px; border-right: 1px solid #eee; font-weight: bold;">${i.installment_no}</td>
-                                    <td style="padding: 8px; border-right: 1px solid #eee;">${Utils.formatDate(i.due_date)}</td>
-                                    <td style="padding: 8px; border-right: 1px solid #eee; text-align: right; font-weight: bold;">
+                                <tr class="${i.computedStatus === 'paid' ? 'row-paid' : ''} ${i.computedStatus === 'short' ? 'row-short' : ''}">
+                                    <td>${i.installment_no}</td>
+                                    <td>${Utils.formatDate(i.due_date)}</td>
+                                    <td class="text-right">
                                         ${Utils.formatCurrency(i.displayDueAmount)}
-                                        ${i.computedStatus !== 'short' && i.currentAmount > i.originalAmount ? `<br><small style="color: #007bff;">(+${Utils.formatCurrency(i.currentAmount - i.originalAmount)} from overdue)</small>` : ''}
+                                        ${i.computedStatus !== 'short' && i.currentAmount > i.originalAmount ? `<br><small class="overdue-shift">(+${Utils.formatCurrency(i.currentAmount - i.originalAmount)} from overdue)</small>` : ''}
                                     </td>
-                                    <td style="padding: 8px; border-right: 1px solid #eee; text-align: right; color: #28a745;">${Utils.formatCurrency(i.paid_amount || 0)}</td>
-                                    <td style="padding: 8px; border-right: 1px solid #eee; text-align: center;">
-                                        <span style="padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; background: ${i.computedStatus === 'paid' ? '#d4edda; color: #155724' : i.computedStatus === 'short' ? '#f8d7da; color: #721c24' : '#d1ecf1; color: #0c5460'};">
+                                    <td class="text-right text-success">${Utils.formatCurrency(i.paid_amount || 0)}</td>
+                                    <td class="text-center">
+                                        <span class="status-pill status-pill-${i.computedStatus === 'paid' ? 'paid' : i.computedStatus === 'short' ? 'short' : 'upcoming'}">
                                             ${Utils.capitalizeWords(i.computedStatus)}
                                         </span>
                                     </td>
-                                    <td style="padding: 8px; text-align: right; font-weight: bold; color: ${i.displayRemainingAmount > 0 ? '#dc3545' : '#28a745'};">${Utils.formatCurrency(i.displayRemainingAmount)}</td>
+                                    <td class="text-right ${i.displayRemainingAmount > 0 ? 'text-danger' : 'text-success'}">${Utils.formatCurrency(i.displayRemainingAmount)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
                 </div>
-                <div class="result-actions" style="margin-top: 16px; text-align: center; padding: 12px; background: #f8f9fa; border-radius: 6px; display: flex; gap: 12px; justify-content: center;">
-                    <button class="btn btn-success" onclick="app.installments.selectCustomerAndClose(${customer.id})" style="padding: 8px 16px;">
+                <div class="result-actions">
+                    <button class="btn btn-success" onclick="app.installments.selectCustomerAndClose(${customer.id})">
                         <i class="fas fa-user-check"></i> Select This Customer
                     </button>
-                    <button class="btn btn-secondary" onclick="app.closeModal()" style="padding: 8px 16px;">
+                    <button class="btn btn-secondary" onclick="app.closeModal()">
                         <i class="fas fa-times"></i> Close Search
                     </button>
                 </div>
@@ -251,7 +249,10 @@ class InstallmentManager {
     }
 
     async selectCustomer(customerId) {
-        const customer = this.searchResultCustomers.find(c => c.id === customerId);
+        let customer = (this.searchResultCustomers || []).find(c => c.id === customerId);
+        if (!customer) {
+            customer = await Database.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+        }
         if (customer) {
             await this.showCustomerDetails(customer);
         }
@@ -353,7 +354,7 @@ class InstallmentManager {
                         ${headerTotals.credit > 0 ? `<div class="detail-item"><label>Credit:</label><span class="text-success">${Utils.formatCurrency(headerTotals.credit)}</span></div>` : ''}
                     </div>
                 </div>
-                <div class="card-footer" style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                <div class="card-footer">
                     <button class="btn btn-secondary" onclick="app.installments.printCurrentSchedule()">
                         <i class="fas fa-print"></i> Print Schedule
                     </button>
@@ -656,7 +657,7 @@ class InstallmentManager {
                 </div>
                 ${purchase ? `
                     <div class="purchase-details">
-                        <h3 style="margin-top: 0;">Purchase Details</h3>
+                        <h3>Purchase Details</h3>
                         <p><strong>Item:</strong> ${purchase.item_name || '-'} &nbsp;&nbsp; 
                            <strong>${Utils.stockIdentifier(purchase).label}:</strong> ${Utils.stockIdentifier(purchase).value}</p>
                         <p><strong>Sale Price:</strong> ${Utils.formatCurrency(purchase.sale_price || 0)} &nbsp;&nbsp;
@@ -923,7 +924,7 @@ class InstallmentManager {
                                     <input type="checkbox" id="mark-as-discount" name="mark_as_discount" class="discount-checkbox" onchange="app.installments.updateDiscountAmount()">
                                     Convert remaining unpaid amount to discount and close account
                                 </label>
-                                <div id="discount-info" style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; display: none;">
+                                <div id="discount-info" class="discount-info hidden">
                                     <small class="text-muted">Discount amount: <span id="discount-amount">Rs. 0</span></small>
                                 </div>
                             </div>
@@ -955,10 +956,10 @@ class InstallmentManager {
         const discountAmount = Math.max(0, totalBalance - paymentAmount);
 
         if (markAsDiscountCheckbox.checked && discountAmount > 0) {
-            discountInfo.style.display = 'block';
+            discountInfo.classList.remove('hidden');
             discountAmountSpan.textContent = Utils.formatCurrency(discountAmount);
         } else {
-            discountInfo.style.display = 'none';
+            discountInfo.classList.add('hidden');
         }
 
         // Store total balance as data attribute for reference
