@@ -238,7 +238,7 @@ class DashboardManager {
         for (let i = 5; i >= 0; i--) {
             const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
             months.push({
-                value: date.toISOString().slice(0, 7), // YYYY-MM format
+                value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
                 label: date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
             });
         }
@@ -313,7 +313,7 @@ class DashboardManager {
                                         ${item.account_no} - ${Utils.truncate(item.item_name, 20)}
                                     </div>
                                     <div class="warning-meta">
-                                        ${Utils.formatCurrency(item.amount - (item.paid_amount || 0))} • 
+                                        ${Utils.formatCurrency(item.remaining_amount != null ? item.remaining_amount : Math.max(0, (item.original_amount || item.amount || 0) - (item.paid_amount || 0)))} • 
                                         ${item.days_overdue} days overdue
                                     </div>
                                 </div>

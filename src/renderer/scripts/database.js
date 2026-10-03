@@ -665,28 +665,50 @@ class Database {
             const soldStockResult = await this.get('SELECT COUNT(*) as count FROM stock WHERE is_sold = 1');
             stats.totalSoldStock = soldStockResult?.count || 0;
 
-            // Pending amount
-            const pendingResult = await this.get(`
-                SELECT SUM(amount - COALESCE(paid_amount, 0)) as pending 
-                FROM installments 
-                WHERE status != 'paid' AND (is_deleted = 0 OR is_deleted IS NULL)
-            `);
-            stats.pendingAmount = pendingResult?.pending || 0;
+            const today = (typeof Utils !== 'undefined' && Utils.toLocalDateString)
+                ? Utils.toLocalDateString(new Date())
+                : null;
 
-            // Overdue installments
-            const overdueResult = await this.get(`
-                SELECT COUNT(*) as count 
-                FROM installments 
-                WHERE due_date < date('now') AND status != 'paid' AND (is_deleted = 0 OR is_deleted IS NULL)
+            const pendingInstallments = await this.get(`
+                SELECT COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
+                        THEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0)
+                        ELSE 0
+                    END
+                ), 0) as pending
+                FROM installments
+                WHERE (is_deleted = 0 OR is_deleted IS NULL)
             `);
+            const pendingCash = await this.get(`
+                SELECT COALESCE(SUM(due_amount), 0) as pending
+                FROM cash_sales
+                WHERE due_amount > 0
+            `);
+            stats.pendingAmount = (pendingInstallments?.pending || 0) + (pendingCash?.pending || 0);
+
+            const overdueSql = today
+                ? `SELECT COUNT(*) as count
+                   FROM installments
+                   WHERE due_date < ?
+                     AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
+                     AND (is_deleted = 0 OR is_deleted IS NULL)`
+                : `SELECT COUNT(*) as count
+                   FROM installments
+                   WHERE due_date < date('now')
+                     AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
+                     AND (is_deleted = 0 OR is_deleted IS NULL)`;
+            const overdueResult = await this.get(overdueSql, today ? [today] : []);
             stats.overdueInstallments = overdueResult?.count || 0;
 
-            // Total collections this month
+            const monthPrefix = today ? today.slice(0, 7) : null;
             const monthlyCollectionResult = await this.get(`
-                SELECT SUM(paid_amount) as total
-                FROM installments 
-                WHERE strftime('%Y-%m', paid_date) = strftime('%Y-%m', 'now') AND (is_deleted = 0 OR is_deleted IS NULL)
-            `);
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM payments
+                WHERE (type = 'payment' OR type IS NULL)
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+                  AND strftime('%Y-%m', payment_date) = ?
+            `, [monthPrefix || '']);
             stats.monthlyCollection = monthlyCollectionResult?.total || 0;
 
             // Active installment customers
@@ -725,22 +747,26 @@ class Database {
     static async getMonthlyCollectionData(months = 6) {
         try {
             const data = await this.query(`
-                SELECT 
-                    strftime('%Y-%m', paid_date) as month,
-                    SUM(paid_amount) as total
-                FROM installments 
-                WHERE paid_date IS NOT NULL 
+                SELECT
+                    strftime('%Y-%m', payment_date) as month,
+                    SUM(amount) as total
+                FROM payments
+                WHERE (type = 'payment' OR type IS NULL)
                 AND (is_deleted = 0 OR is_deleted IS NULL)
-                AND paid_date >= date('now', '-${months} months')
-                GROUP BY strftime('%Y-%m', paid_date)
+                AND payment_date >= date('now', '-${Number(months) || 6} months')
+                GROUP BY strftime('%Y-%m', payment_date)
                 ORDER BY month ASC
             `);
 
-            return data.map(row => ({
-                month: row.month,
-                total: row.total || 0,
-                label: new Date(row.month + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-            }));
+            return data.map(row => {
+                const [y, m] = String(row.month || '').split('-').map(Number);
+                const local = (y && m) ? new Date(y, m - 1, 1) : new Date();
+                return {
+                    month: row.month,
+                    total: row.total || 0,
+                    label: local.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                };
+            });
         } catch (error) {
             console.error('Error getting monthly collection data:', error);
             return [];
@@ -749,6 +775,9 @@ class Database {
 
     // Get overdue installments details
     static async getOverdueInstallments() {
+        const today = (typeof Utils !== 'undefined' && Utils.toLocalDateString)
+            ? Utils.toLocalDateString(new Date())
+            : new Date().toISOString().slice(0, 10);
         return await this.query(`
             SELECT 
                 i.*,
@@ -757,15 +786,22 @@ class Database {
                 c.phone,
                 p.item_name,
                 s.engine_no,
-                CAST(julianday('now') - julianday(i.due_date) as INTEGER) as days_overdue
+                CASE
+                    WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                    THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)
+                    ELSE 0
+                END as remaining_amount,
+                CAST(julianday(?) - julianday(i.due_date) as INTEGER) as days_overdue
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
-            WHERE i.due_date < date('now') AND i.status != 'paid' AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+            WHERE i.due_date < ?
+              AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+              AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
             ORDER BY i.due_date ASC
-        `);
+        `, [today, today]);
     }
 
     // Payment history for a date range
@@ -1173,6 +1209,9 @@ class Database {
 
     // Dues and Reminders Management
     static async getInstallmentDues() {
+        const today = (typeof Utils !== 'undefined' && Utils.toLocalDateString)
+            ? Utils.toLocalDateString(new Date())
+            : new Date().toISOString().slice(0, 10);
         return await this.safeQuery(`
             SELECT 
                 i.*,
@@ -1181,10 +1220,14 @@ class Database {
                 c.phone,
                 c.id as customer_id,
                 p.item_name,
-                (i.amount - COALESCE(i.paid_amount, 0)) as remaining_amount,
+                CASE
+                    WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                    THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)
+                    ELSE 0
+                END as remaining_amount,
                 CASE 
-                    WHEN i.due_date < date('now') AND i.status != 'paid' 
-                    THEN CAST(julianday('now') - julianday(i.due_date) as INTEGER)
+                    WHEN i.due_date < ?
+                    THEN CAST(julianday(?) - julianday(i.due_date) as INTEGER)
                     ELSE 0
                 END as days_overdue
             FROM installments i
@@ -1192,12 +1235,13 @@ class Database {
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
-            WHERE i.status != 'paid' 
+            WHERE COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+              AND (i.status = 'short' OR i.due_date < ?)
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
               AND cp.status != 'deleted'
             ORDER BY i.due_date ASC
-        `, [], []);
+        `, [today, today, today], []);
     }
 
     static async getCashSaleDues() {
@@ -1219,25 +1263,32 @@ class Database {
 
     static async getOverdueItems() {
         // Get overdue installments
+        const today = (typeof Utils !== 'undefined' && Utils.toLocalDateString)
+            ? Utils.toLocalDateString(new Date())
+            : new Date().toISOString().slice(0, 10);
         const overdueInstallments = await this.safeQuery(`
             SELECT 
                 'installment' as type,
                 i.id,
                 i.due_date,
-                (i.amount - COALESCE(i.paid_amount, 0)) as amount,
+                CASE
+                    WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                    THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)
+                    ELSE 0
+                END as amount,
                 c.customer_name,
                 c.phone,
                 c.id as customer_id,
-                CAST(julianday('now') - julianday(i.due_date) as INTEGER) as days_overdue
+                CAST(julianday(?) - julianday(i.due_date) as INTEGER) as days_overdue
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
-            WHERE i.due_date < date('now') 
-              AND i.status != 'paid' 
+            WHERE i.due_date < ?
+              AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
               AND cp.status != 'deleted'
-        `, [], []);
+        `, [today, today], []);
 
         // Get overdue cash sales (we'll consider them overdue after 30 days)
         const overdueCashSales = await this.safeQuery(`

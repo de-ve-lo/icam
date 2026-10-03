@@ -250,6 +250,9 @@
     padding: 1rem 1.5rem;
     border-top: 1px solid var(--border-color);
     background: var(--background-color);
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
 }
 
 /* Tabs Component */
@@ -849,12 +852,6 @@
 
 .overdue-shift {
     color: var(--primary-color);
-}
-
-.card-footer {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
 }
 
 .discount-info {
