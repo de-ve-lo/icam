@@ -260,6 +260,21 @@ class Utils {
         URL.revokeObjectURL(url);
     }
     
+    static developerCreditCss() {
+        return `.developer-credit { margin-top: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #ddd; padding-top: 12px; }`;
+    }
+
+    static developerCreditHtml() {
+        return `<div class="developer-credit">
+            <p>Developed By <strong>POVDEV</strong></p>
+            <p>povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com</p>
+        </div>`;
+    }
+
+    static developerCreditText() {
+        return 'Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com';
+    }
+
     // Print utilities
     static printElement(elementId, title = 'Print Document') {
         const element = document.getElementById(elementId);
@@ -276,6 +291,7 @@ class Utils {
                     table { width: 100%; border-collapse: collapse; }
                     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
                     th { background-color: #f2f2f2; }
+                    .developer-credit { margin-top: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #ddd; padding-top: 12px; }
                     @media print {
                         body { margin: 0; }
                     }
@@ -283,6 +299,7 @@ class Utils {
             </head>
             <body>
                 ${element.innerHTML}
+                ${Utils.developerCreditHtml()}
             </body>
             </html>
         `);

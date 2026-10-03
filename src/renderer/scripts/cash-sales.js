@@ -244,6 +244,8 @@ class CashSalesManager {
                         .invoice-details td, .invoice-details th { border: 1px solid #ddd; padding: 8px; text-align: left; }
                         .invoice-details th { background: #f5f5f5; font-weight: bold; }
                         .total-row { background: #e8f4f8; font-weight: bold; }
+                        .print-thanks { text-align: center; margin-top: 40px; font-size: 12px; }
+                        ${Utils.developerCreditCss()}
                     </style>
                 </head>
                 <body>
@@ -262,7 +264,8 @@ class CashSalesManager {
                         <tr class="total-row"><th>Status</th><td>${Utils.capitalizeWords(sale.payment_status)}</td></tr>
                     </table>
                     ${sale.notes ? `<p><strong>Notes:</strong> ${sale.notes}</p>` : ''}
-                    <p style="text-align: center; margin-top: 40px; font-size: 12px;">Thank you for your business!</p>
+                    <p class="print-thanks">Thank you for your business!</p>
+                    ${Utils.developerCreditHtml()}
                 </body>
                 </html>
             `;

@@ -178,6 +178,46 @@ body.modal-open {
     display: none;
 }
 
+.developer-credit {
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.developer-credit p {
+    margin: 0.15rem 0;
+}
+
+.developer-credit a {
+    color: var(--primary-color);
+}
+
+.developer-credit-inline {
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.sidebar-credit {
+    margin: 1.5rem 1rem 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.auth-card .developer-credit {
+    margin-top: 1.25rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.print-thanks {
+    text-align: center;
+    margin-top: 40px;
+    font-size: 12px;
+}
+
 .nav-menu {
     list-style: none;
     padding: 0 1rem;
@@ -590,6 +630,12 @@ body.modal-open {
 
 .report-panel .print-btn {
     margin-bottom: 1rem;
+}
+
+.report-panel .developer-credit {
+    margin-top: 1.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
 }
 
 .summary-grid {

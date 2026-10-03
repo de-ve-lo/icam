@@ -157,6 +157,7 @@ class ReportsManager {
             <p>Period: ${period || 'All dates'}</p>
             ${inner}
             <p><strong>Generated on:</strong> ${this.safeFormatDate(new Date())}</p>
+            ${typeof Utils !== 'undefined' && Utils.developerCreditHtml ? Utils.developerCreditHtml() : '<p class="developer-credit">Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com</p>'}
         </div>`;
     }
 

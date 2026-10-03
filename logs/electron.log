@@ -1,8 +1,0 @@
-
-> installment-management-app@1.0.0 start
-> electron .
-
-
-Connected to SQLite database
-All database tables created successfully
-Database connection closed

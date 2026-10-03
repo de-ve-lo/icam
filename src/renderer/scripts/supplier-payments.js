@@ -368,6 +368,8 @@ class SupplierPaymentsManager {
                         .receipt-details td, .receipt-details th { border: 1px solid #ddd; padding: 8px; text-align: left; }
                         .receipt-details th { background: #f5f5f5; font-weight: bold; }
                         .total-row { background: #e8f4f8; font-weight: bold; }
+                        .print-thanks { text-align: center; margin-top: 40px; font-size: 12px; }
+                        ${Utils.developerCreditCss()}
                     </style>
                 </head>
                 <body>
@@ -384,7 +386,8 @@ class SupplierPaymentsManager {
                         <tr class="total-row"><th>Payment Date</th><td>${Utils.formatDate(payment.payment_date, 'readable')}</td></tr>
                     </table>
                     ${payment.notes ? `<p><strong>Notes:</strong> ${payment.notes}</p>` : ''}
-                    <p style="text-align: center; margin-top: 40px; font-size: 12px;">Payment processed successfully</p>
+                    <p class="print-thanks">Payment processed successfully</p>
+                    ${Utils.developerCreditHtml()}
                 </body>
                 </html>
             `;

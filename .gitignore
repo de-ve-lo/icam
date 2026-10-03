@@ -4,3 +4,12 @@ database/*.db
 database/backups/
 logs/
 *.log
+tests/
+docs/
+.superpowers/
+CODE_REVIEW_SUMMARY.md
+FIXES_SUMMARY.md
+INSTALLMENT_SYSTEM_IMPLEMENTATION_SUMMARY.md
+TESTING_ISSUES_ANALYSIS.md
+WARP.md
+src/renderer/scripts/components.js

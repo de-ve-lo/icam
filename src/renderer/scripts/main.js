@@ -133,7 +133,7 @@ class App {
                 this.showNotification('Restore from File > Restore Database is not available here. Use a backup copy of the database file.', 'warning');
             });
             window.electronAPI.on('show-about', () => {
-                this.showNotification('Installment Management — local shop app. Default login admin / admin.', 'info');
+                this.showNotification('Installment Management. Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com', 'info');
             });
         }
 

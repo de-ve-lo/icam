@@ -2,6 +2,8 @@
 
 A comprehensive desktop application for managing motorcycle/bike installment sales, built with Electron.js and SQLite.
 
+Developed By **POVDEV** — [povdev.com](https://povdev.com) | WhatsApp: @wpfahad | Email: mypovdev@gmail.com
+
 ## Features
 
 ### Core Functionality

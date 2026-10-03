@@ -18,7 +18,7 @@
     "desktop",
     "electron"
   ],
-  "author": "Your Name",
+  "author": "POVDEV <mypovdev@gmail.com> (https://povdev.com)",
   "license": "MIT",
   "devDependencies": {
     "electron": "^27.0.0",

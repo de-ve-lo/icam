@@ -645,6 +645,7 @@ class InstallmentManager {
                     .status-paid { color: #065f46; }
                     .status-pending { color: #92400e; }
                     .status-partial { color: #334155; }
+                    ${Utils.developerCreditCss()}
                 </style>
             </head>
             <body>
@@ -702,6 +703,7 @@ class InstallmentManager {
                         ${discounts.length ? `<ul>${discounts.map(d => `<li>Amount: ${Utils.formatCurrency(d.amount)} (${d.reason || 'Discount'})</li>`).join('')}</ul>` : '<p class="text-muted">None</p>'}
                     </div>
                 ` : ''}
+                ${Utils.developerCreditHtml()}
             </body>
             </html>
         `;
@@ -763,6 +765,7 @@ class InstallmentManager {
                         .distribution-table th { background: #e7f3ff; }
                         .discount-row { color: #856404; background-color: #fff3cd; }
                         .summary-section { margin-top: 20px; text-align: right; }
+                        ${Utils.developerCreditCss()}
                     </style>
                 </head>
                 <body>
@@ -813,6 +816,7 @@ class InstallmentManager {
                             <tr><th>Status</th><td>${Utils.capitalizeWords(inst.status)}</td></tr>
                         </table>
                     `}
+                    ${Utils.developerCreditHtml()}
                 </body>
                 </html>
             `;
