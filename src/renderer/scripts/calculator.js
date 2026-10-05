@@ -123,6 +123,13 @@ class InstallmentCalculator {
                                                 </select>
                                             </div>
                                             <div class="form-group">
+                                                <label class="form-label">Custom Installment Amount</label>
+                                                <div class="input-group">
+                                                    <span class="input-prefix">Rs.</span>
+                                                    <input type="number" name="custom_installment" class="form-input" min="1" step="1" placeholder="Optional" oninput="calculator.updateCalculations()">
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
                                                 <label class="form-label required">Start Date</label>
                                                 <input type="date" name="start_date" class="form-input" required value="${Utils.getCurrentDate('YYYY-MM-DD')}" onchange="calculator.updateCalculations()">
                                             </div>
@@ -200,6 +207,7 @@ class InstallmentCalculator {
         const startDate = formData.get('start_date');
         let profitPct = parseFloat(formData.get('profit_percentage'));
         let profitAmt = parseFloat(formData.get('profit_amount'));
+        const customInstallment = parseFloat(formData.get('custom_installment'));
         const activeField = document.activeElement ? document.activeElement.getAttribute('name') : null;
 
         const stockItem = this.availableStock.find(s => String(s.id) === String(stockId));
@@ -216,45 +224,42 @@ class InstallmentCalculator {
         const principalBase = Math.max(0, (salePrice || 0) - (advancePayment || 0));
 
         if (activeField === 'profit_percentage' && !isNaN(profitPct)) {
-            // Compute profit amount from percentage of principal, round to whole rupees
             profitAmt = Math.round((principalBase * profitPct) / 100);
             const amtEl = form.querySelector('[name="profit_amount"]');
             if (amtEl) amtEl.value = profitAmt;
         } else if (activeField === 'profit_amount' && !isNaN(profitAmt)) {
-            // Compute percentage from profit amount relative to principal
             profitPct = principalBase > 0 ? Utils.roundTo((profitAmt / principalBase) * 100, 2) : 0;
             const pctEl = form.querySelector('[name="profit_percentage"]');
             if (pctEl) pctEl.value = profitPct;
         } else {
-            // Default: if neither field is actively edited, derive one from the other or from margin
             if (!salePrice) {
                 this.clearResults();
                 return;
             }
-            if (!isNaN(profitPct)) {
-                profitAmt = Math.round((principalBase * (profitPct || 0)) / 100);
-            } else if (!isNaN(profitAmt)) {
+            if (!isNaN(profitAmt)) {
                 profitPct = principalBase > 0 ? Utils.roundTo((profitAmt / principalBase) * 100, 2) : 0;
+            } else if (!isNaN(profitPct)) {
+                profitAmt = Math.round((principalBase * (profitPct || 0)) / 100);
             } else {
-                // Fallback to margin between sale and purchase
                 profitAmt = Math.max(0, Math.round(salePrice - purchasePrice));
                 profitPct = principalBase > 0 ? Utils.roundTo((profitAmt / principalBase) * 100, 2) : 0;
             }
             const pctEl = form.querySelector('[name="profit_percentage"]');
             const amtEl = form.querySelector('[name="profit_amount"]');
-            if (pctEl) pctEl.value = profitPct;
-            if (amtEl) amtEl.value = profitAmt;
+            if (pctEl && !isNaN(profitPct)) pctEl.value = profitPct;
+            if (amtEl && !isNaN(profitAmt)) amtEl.value = profitAmt;
         }
 
         try {
-            // Calculate installment schedule
             const calculation = Utils.calculateInstallmentSchedule({
                 salePrice: salePrice,
                 purchasePrice: purchasePrice,
                 profitPercentage: isNaN(profitPct) ? undefined : profitPct,
+                profitAmountOverride: isNaN(profitAmt) ? undefined : profitAmt,
                 advancePayment: advancePayment,
                 installmentMonths: months,
-                startDate: startDate
+                startDate: startDate,
+                customMonthlyAmount: isNaN(customInstallment) ? undefined : customInstallment
             });
 
             this.currentCalculation = {

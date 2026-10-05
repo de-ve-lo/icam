@@ -162,6 +162,39 @@ class InstallmentManager {
         }
     }
 
+     scheduleDisplayRows(list) {
+        return (list || []).slice().sort((a, b) => a.installment_no - b.installment_no).map((i) => {
+            const currentAmount = Number(i.amount) || 0;
+            const originalAmount = Number(i.original_amount) || currentAmount;
+            const computedStatus = i.status || 'upcoming';
+            return {
+                ...i,
+                computedStatus,
+                displayDueAmount: currentAmount,
+                displayRemainingAmount: Number(i.remaining_balance) || 0,
+                originalAmount,
+                currentAmount
+            };
+        });
+    }
+
+    amountCellHtml(i) {
+        const extra = i.computedStatus !== 'short' && i.currentAmount > i.originalAmount
+            ? `<br><small class="text-info">(Includes ${Utils.formatCurrency(i.currentAmount - i.originalAmount)} from overdue)</small>`
+            : '';
+        const shortNote = i.computedStatus === 'short'
+            ? `<br><small class="text-muted">Original ${Utils.formatCurrency(i.originalAmount)} moved to next</small>`
+            : '';
+        return `${Utils.formatCurrency(i.displayDueAmount)}${extra}${shortNote}`;
+    }
+
+    scheduleHeading(rows) {
+        const first = rows[0] || {};
+        const ident = Utils.stockIdentifier(first);
+        const item = first.item_name || 'Schedule';
+        return `${item} (${ident.label}: ${ident.value})`;
+    }
+
     renderCustomerResultDetails(customer, installments) {
         if (installments.length === 0) {
             return `
@@ -174,20 +207,7 @@ class InstallmentManager {
             `;
         }
 
-        // Use corrected shortage logic consistent with main display
-        const sortedList = installments.slice().sort((a, b) => a.installment_no - b.installment_no);
-        const displayRows = sortedList.map((i) => {
-            const currentAmount = Number(i.amount) || 0;
-            const originalAmount = Number(i.original_amount) || currentAmount;
-            return {
-                ...i,
-                computedStatus: i.status || 'upcoming',
-                displayDueAmount: currentAmount,
-                displayRemainingAmount: Number(i.remaining_balance) || 0,
-                originalAmount,
-                currentAmount
-            };
-        });
+        const groups = InstallmentEngine.groupByPurchase(installments);
 
         return `
             <div class="customer-result-details">
@@ -198,11 +218,16 @@ class InstallmentManager {
                         <div><strong><i class="fas fa-phone"></i> Phone:</strong> ${customer.phone}</div>
                     </div>
                 </div>
+                ${groups.map((group) => {
+                    const displayRows = this.scheduleDisplayRows(group.installments);
+                    const totals = InstallmentEngine.totals(displayRows);
+                    return `
                 <div class="installments-full">
                     <div class="installments-full-header">
                         <h4>
-                            <i class="fas fa-credit-card"></i> Installment Schedule (${displayRows.length} installments)
+                            <i class="fas fa-credit-card"></i> ${this.scheduleHeading(displayRows)} (${displayRows.length} installments)
                         </h4>
+                        <p>Remaining: ${Utils.formatCurrency(totals.grandRemaining)}</p>
                     </div>
                     <table class="data-table">
                         <thead>
@@ -221,8 +246,7 @@ class InstallmentManager {
                                     <td>${i.installment_no}</td>
                                     <td>${Utils.formatDate(i.due_date)}</td>
                                     <td class="text-right">
-                                        ${Utils.formatCurrency(i.displayDueAmount)}
-                                        ${i.computedStatus !== 'short' && i.currentAmount > i.originalAmount ? `<br><small class="overdue-shift">(+${Utils.formatCurrency(i.currentAmount - i.originalAmount)} from overdue)</small>` : ''}
+                                        ${this.amountCellHtml(i)}
                                     </td>
                                     <td class="text-right text-success">${Utils.formatCurrency(i.paid_amount || 0)}</td>
                                     <td class="text-center">
@@ -235,7 +259,8 @@ class InstallmentManager {
                             `).join('')}
                         </tbody>
                     </table>
-                </div>
+                </div>`;
+                }).join('')}
                 <div class="result-actions">
                     <button class="btn btn-success" onclick="app.installments.selectCustomerAndClose(${customer.id})">
                         <i class="fas fa-user-check"></i> Select This Customer
@@ -268,7 +293,7 @@ class InstallmentManager {
 
     async searchCustomer(searchTerm) {
         if (!searchTerm || searchTerm.trim() === '') {
-            app.showNotification('Enter account no or CNIC to search', 'warning');
+            app.showNotification('Enter account, CNIC, stock, engine or chassis to search', 'warning');
             return;
         }
 
@@ -296,8 +321,6 @@ class InstallmentManager {
     }
 
     renderCustomerInfo(c) {
-        const hasPurchaseId = this.installments && this.installments.length > 0 && this.installments[0] && this.installments[0].purchase_id;
-
         // Calculate account status
         let accountStatus = 'Unknown';
         let statusBadgeClass = 'secondary';
@@ -350,16 +373,114 @@ class InstallmentManager {
                                 </span>
                             </span>
                         </div>
-                        <div class="detail-item"><label>Grand Remaining:</label><span>${Utils.formatCurrency(headerTotals.grandRemaining)}</span></div>
+                        <div class="detail-item"><label>Total Remaining (all schedules):</label><span>${Utils.formatCurrency(headerTotals.grandRemaining)}</span></div>
                         ${headerTotals.credit > 0 ? `<div class="detail-item"><label>Credit:</label><span class="text-success">${Utils.formatCurrency(headerTotals.credit)}</span></div>` : ''}
                     </div>
                 </div>
                 <div class="card-footer">
                     <button class="btn btn-secondary" onclick="app.installments.printCurrentSchedule()">
-                        <i class="fas fa-print"></i> Print Schedule
+                        <i class="fas fa-print"></i> Print First Schedule
                     </button>
-                    ${hasPurchaseId && !(window.auth && window.auth.isEmployee()) ? `
-                    <button class="btn btn-danger" onclick="app.installments.openDeleteScheduleModal(${this.installments[0].purchase_id})">
+                </div>
+            </div>
+        `;
+    }
+
+     renderScheduleTable(displayRows, isCompleted) {
+        const totals = InstallmentEngine.totals(displayRows);
+        const grandRemaining = totals.grandRemaining;
+        const allShort = displayRows.every(r => r.computedStatus === 'short');
+        const last = displayRows[displayRows.length - 1];
+        const canDelete = last && last.purchase_id && !(window.auth && window.auth.isEmployee());
+
+        return `
+            <div class="installment-schedule-block">
+                <div class="installments-full-header">
+                    <h4><i class="fas fa-credit-card"></i> ${this.scheduleHeading(displayRows)}</h4>
+                    <p>Remaining: ${Utils.formatCurrency(grandRemaining)} &nbsp; Profit: ${Utils.formatCurrency(displayRows[0].profit_amount || 0)}</p>
+                </div>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Due Date</th>
+                                <th>Amount</th>
+                                <th>Paid</th>
+                                <th>Status</th>
+                                <th>Remaining</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${displayRows.map(i => `
+                                <tr class="stagger-item ${i.computedStatus === 'paid' ? 'row-paid' : ''} ${i.computedStatus === 'short' ? 'row-overdue' : ''}">
+                                    <td>${i.installment_no}</td>
+                                    <td>${Utils.formatDate(i.due_date)}</td>
+                                    <td>
+                                        ${this.amountCellHtml(i)}
+                                    </td>
+                                    <td>
+                                        ${Utils.formatCurrency((i.paid_amount || 0) - (i.discount_amount || 0))}
+                                        ${i.discount_amount > 0 ? `<br><small class="text-warning" title="Discount Applied">+ ${Utils.formatCurrency(i.discount_amount)} (Disc)</small>` : ''}
+                                    </td>
+                                    <td>
+                                        <span class="status-badge ${i.computedStatus}">${Utils.capitalizeWords(i.computedStatus)}</span>
+                                    </td>
+                                    <td class="${i.displayRemainingAmount > 0 ? 'text-danger' : 'text-success'}">
+                                        ${Utils.formatCurrency(i.displayRemainingAmount)}
+                                    </td>
+                                    <td>
+                                        ${!isCompleted && (i.computedStatus === 'paid' || i.computedStatus === 'settled' || i.computedStatus === 'partial') ? `
+                                            <button class="btn btn-sm btn-info" onclick="app.installments.printReceipt(${i.installment_id})">
+                                                <i class="fas fa-print"></i> Receipt
+                                            </button>
+                                            ${i.computedStatus === 'partial' ? `
+                                                <button class="btn btn-sm btn-success" onclick="app.installments.openPayRemainingModal(${i.installment_id})">
+                                                    <i class="fas fa-money-bill"></i> Pay Rem.
+                                                </button>
+                                            ` : ''}
+                                            <button class="btn btn-sm btn-secondary" onclick="app.installments.openEditPaymentModal(${i.installment_id})">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </button>
+                                            ${!(window.auth && window.auth.isEmployee()) ? `
+                                            <button class="btn btn-sm btn-danger" onclick="app.installments.confirmVoidPayment(${i.installment_id})">
+                                                <i class="fas fa-times"></i> Void
+                                            </button>` : ''}
+                                        ` : (i.computedStatus === 'short' ? `
+                                            <span class="badge badge-warning"><i class="fas fa-exclamation-triangle"></i> Short</span>
+                                        ` : `
+                                            ${!isCompleted ? `
+                                                <button class="btn btn-sm btn-success" onclick="app.installments.openPaymentModal(${i.installment_id})">
+                                                    <i class="fas fa-check"></i> Pay Now
+                                                </button>
+                                            ` : ''}
+                                        `)}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                ${allShort && grandRemaining > 0 ? `
+                    <div class="alert alert-info">
+                        <strong><i class="fas fa-info-circle"></i> All installments are overdue (short).</strong>
+                        The accumulated shortage of <strong>${Utils.formatCurrency(grandRemaining)}</strong> will be collected at the next payment using the "Pay Remaining/Short Balance" option below.
+                    </div>
+                ` : ''}
+                <div class="installment-actions-row">
+                    <button class="btn btn-secondary" onclick="app.installments.printCurrentSchedule(${last.purchase_id})">
+                        <i class="fas fa-print"></i> Print This Schedule
+                    </button>
+                    ${grandRemaining > 0 && !isCompleted ? `
+                    <button class="btn btn-warning" onclick="app.installments.openRemainingModal(${last.installment_id}, ${grandRemaining})">
+                        <i class="fas fa-exclamation-circle"></i> Pay Remaining/Short Balance: ${Utils.formatCurrency(grandRemaining)}
+                    </button>
+                    <button class="btn btn-secondary" onclick="app.installments.openPenaltyModal(${last.purchase_id})">
+                        <i class="fas fa-plus"></i> Add Penalty/Profit
+                    </button>` : ''}
+                    ${canDelete ? `
+                    <button class="btn btn-danger" onclick="app.installments.openDeleteScheduleModal(${last.purchase_id})">
                         <i class="fas fa-trash"></i> Delete Schedule
                     </button>` : ''}
                 </div>
@@ -377,123 +498,14 @@ class InstallmentManager {
             return;
         }
 
-        // Get purchase status to determine if account is completed
-        let purchaseStatus = 'active';
-        if (list.length > 0 && list[0].purchase_id) {
-            try {
-                const purchase = await Database.get('SELECT status FROM customer_purchases WHERE id = ?', [list[0].purchase_id]);
-                purchaseStatus = purchase?.status || 'active';
-            } catch (e) {
-                console.error('Error fetching purchase status:', e);
-            }
-        }
-        const isCompleted = purchaseStatus === 'completed';
-
-        const sortedList = list.slice().sort((a, b) => a.installment_no - b.installment_no);
-        const totals = InstallmentEngine.totals(sortedList);
-        const grandRemaining = totals.grandRemaining;
-        const credit = totals.credit;
-
-        const displayRows = sortedList.map((i) => {
-            const currentAmount = Number(i.amount) || 0;
-            const originalAmount = Number(i.original_amount) || currentAmount;
-            const computedStatus = i.status || 'upcoming';
-            return {
-                ...i,
-                computedStatus,
-                displayDueAmount: currentAmount,
-                displayRemainingAmount: Number(i.remaining_balance) || 0,
-                originalAmount,
-                currentAmount
-            };
+        const groups = InstallmentEngine.groupByPurchase(list);
+        const sections = groups.map((group) => {
+            const displayRows = this.scheduleDisplayRows(group.installments);
+            const isCompleted = (displayRows[0] && displayRows[0].purchase_status) === 'completed';
+            return this.renderScheduleTable(displayRows, isCompleted);
         });
 
-        const allShort = displayRows.every(r => r.computedStatus === 'short');
-
-        const table = `
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Due Date</th>
-                            <th>Amount</th>
-                            <th>Paid</th>
-                            <th>Status</th>
-                            <th>Remaining</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${displayRows.map(i => `
-                            <tr class="stagger-item ${i.computedStatus === 'paid' ? 'row-paid' : ''} ${i.computedStatus === 'short' ? 'row-overdue' : ''}">
-                                <td>${i.installment_no}</td>
-                                <td>${Utils.formatDate(i.due_date)}</td>
-                                <td>
-                                    ${Utils.formatCurrency(i.displayDueAmount)}
-                                    ${i.computedStatus !== 'short' && i.currentAmount > i.originalAmount ? `<br><small class="text-info">(Includes ${Utils.formatCurrency(i.currentAmount - i.originalAmount)} from overdue)</small>` : ''}
-                                </td>
-                                <td>
-                                    ${Utils.formatCurrency((i.paid_amount || 0) - (i.discount_amount || 0))}
-                                    ${i.discount_amount > 0 ? `<br><small class="text-warning" title="Discount Applied">+ ${Utils.formatCurrency(i.discount_amount)} (Disc)</small>` : ''}
-                                </td>
-                                <td>
-                                    <span class="status-badge ${i.computedStatus}">${Utils.capitalizeWords(i.computedStatus)}</span>
-                                </td>
-                                <td class="${i.displayRemainingAmount > 0 ? 'text-danger' : 'text-success'}">
-                                    ${Utils.formatCurrency(i.displayRemainingAmount)}
-                                </td>
-                                <td>
-                                    ${!isCompleted && (i.computedStatus === 'paid' || i.computedStatus === 'settled' || i.computedStatus === 'partial') ? `
-                                        <button class="btn btn-sm btn-info" onclick="app.installments.printReceipt(${i.installment_id})">
-                                            <i class="fas fa-print"></i> Receipt
-                                        </button>
-                                        ${i.computedStatus === 'partial' ? `
-                                            <button class="btn btn-sm btn-success" onclick="app.installments.openPayRemainingModal(${i.installment_id})">
-                                                <i class="fas fa-money-bill"></i> Pay Rem.
-                                            </button>
-                                        ` : ''}
-                                        <button class="btn btn-sm btn-secondary" onclick="app.installments.openEditPaymentModal(${i.installment_id})">
-                                            <i class="fas fa-edit"></i> Edit
-                                        </button>
-                                        ${!(window.auth && window.auth.isEmployee()) ? `
-                                        <button class="btn btn-sm btn-danger" onclick="app.installments.confirmVoidPayment(${i.installment_id})">
-                                            <i class="fas fa-times"></i> Void
-                                        </button>` : ''}
-                                    ` : (i.computedStatus === 'short' ? `
-                                        <span class="badge badge-warning"><i class="fas fa-exclamation-triangle"></i> Short</span>
-                                    ` : `
-                                        ${!isCompleted ? `
-                                            <button class="btn btn-sm btn-success" onclick="app.installments.openPaymentModal(${i.installment_id})">
-                                                <i class="fas fa-check"></i> Pay Now
-                                            </button>
-                                        ` : ''}
-                                    `)}
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            ${allShort && grandRemaining > 0 ? `
-                <div class="alert alert-info">
-                    <strong><i class="fas fa-info-circle"></i> All installments are overdue (short).</strong>
-                    The accumulated shortage of <strong>${Utils.formatCurrency(grandRemaining)}</strong> will be collected at the next payment using the "Pay Remaining/Short Balance" option below.
-                </div>
-            ` : ''}
-            ${grandRemaining > 0 && !isCompleted ? `
-                <div class="installment-actions-row">
-                    <button class="btn btn-warning" onclick="app.installments.openRemainingModal(${displayRows[displayRows.length - 1].installment_id}, ${grandRemaining})">
-                        <i class="fas fa-exclamation-circle"></i> Pay Remaining/Short Balance: ${Utils.formatCurrency(grandRemaining)}
-                    </button>
-                    <button class="btn btn-secondary" onclick="app.installments.openPenaltyModal(${displayRows[displayRows.length - 1].purchase_id})">
-                        <i class="fas fa-plus"></i> Add Penalty/Profit
-                    </button>
-                </div>
-            ` : ''}
-        `;
-
-        container.innerHTML = table;
+        container.innerHTML = sections.join('');
     }
 
     openPaymentModal(installmentId) {
@@ -589,14 +601,17 @@ class InstallmentManager {
         }
     }
 
-    async printCurrentSchedule() {
+    async printCurrentSchedule(purchaseIdArg = null) {
         if (!this.currentCustomer || !this.installments || this.installments.length === 0) {
             app.showNotification('No schedule to print', 'warning');
             return;
         }
         const c = this.currentCustomer;
-        const schedule = this.installments;
-        const purchaseId = schedule[0]?.purchase_id;
+        const groups = InstallmentEngine.groupByPurchase(this.installments);
+        const targetId = purchaseIdArg || (groups[0] && groups[0].purchaseId);
+        const group = groups.find(g => Number(g.purchaseId) === Number(targetId)) || groups[0];
+        const schedule = this.scheduleDisplayRows(group.installments);
+        const purchaseId = group.purchaseId;
         let penalties = [];
         let discounts = [];
         let purchase = null;
@@ -682,18 +697,19 @@ class InstallmentManager {
                         </tr>
                     </thead>
                     <tbody>
-                        ${schedule.map(i => `
-                            <tr>
-                                <td>${i.installment_no}</td>
-                                <td>${Utils.formatDate(i.due_date, 'readable')}</td>
-                                <td>${Utils.formatCurrency(i.amount)}</td>
-                                <td>${Utils.formatCurrency(i.paid_amount || 0)}</td>
-                                <td class="status-${i.status}">${Utils.capitalizeWords(i.status)}</td>
-                                <td>${Utils.formatCurrency(i.remaining_balance)}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                         ${schedule.map(i => `
+                             <tr>
+                                 <td>${i.installment_no}</td>
+                                 <td>${Utils.formatDate(i.due_date, 'readable')}</td>
+                                 <td>${Utils.formatCurrency(i.displayDueAmount)}${i.computedStatus === 'short' ? ` (original ${Utils.formatCurrency(i.originalAmount)} moved to next)` : (i.currentAmount > i.originalAmount ? ` (includes overdue)` : '')}</td>
+                                 <td>${Utils.formatCurrency(i.paid_amount || 0)}</td>
+                                 <td class="status-${i.computedStatus}">${Utils.capitalizeWords(i.computedStatus)}</td>
+                                 <td>${Utils.formatCurrency(i.displayRemainingAmount)}</td>
+                             </tr>
+                         `).join('')}
+                     </tbody>
+                 </table>
+                 <p><strong>Schedule Remaining:</strong> ${Utils.formatCurrency(InstallmentEngine.totals(schedule).grandRemaining)}</p>
                 ${purchaseId ? `
                     <h3>Adjustments</h3>
                     <div class="adjustments">

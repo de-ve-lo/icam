@@ -42,15 +42,16 @@
       profitAmountOverride,
       advancePayment = 0,
       installmentMonths,
-      startDate
+      startDate,
+      customMonthlyAmount
     }) {
       const principal = Math.max(0, Math.round(salePrice - advancePayment));
 
       let profitAmount;
-      if (typeof profitPercentage === 'number' && !isNaN(profitPercentage)) {
-        profitAmount = Math.round((principal * profitPercentage) / 100);
-      } else if (typeof profitAmountOverride === 'number' && !isNaN(profitAmountOverride)) {
+      if (typeof profitAmountOverride === 'number' && !isNaN(profitAmountOverride)) {
         profitAmount = Math.round(profitAmountOverride);
+      } else if (typeof profitPercentage === 'number' && !isNaN(profitPercentage)) {
+        profitAmount = Math.round((principal * profitPercentage) / 100);
       } else {
         profitAmount = Math.max(0, Math.round(salePrice - purchasePrice));
       }
@@ -58,8 +59,18 @@
       const totalAmount = principal + profitAmount;
       const remainingAmount = totalAmount;
       const months = installmentMonths;
-      const base = Math.floor(totalAmount / months);
-      const last = totalAmount - base * (months - 1);
+      let base;
+      let last;
+      if (typeof customMonthlyAmount === 'number' && !isNaN(customMonthlyAmount) && customMonthlyAmount > 0) {
+        base = Math.round(customMonthlyAmount);
+        last = totalAmount - base * (months - 1);
+        if (last < 0) {
+          throw new EngineError('InvalidAmount', 'Custom installment is larger than remaining total');
+        }
+      } else {
+        base = Math.floor(totalAmount / months);
+        last = totalAmount - base * (months - 1);
+      }
 
       const schedule = [];
       const currentDate = parseLocalDate(startDate);
@@ -96,6 +107,19 @@
           installmentMonths: months
         }
       };
+    },
+
+    groupByPurchase(rows) {
+      const map = new Map();
+      for (const row of rows || []) {
+        const purchaseId = row.purchase_id;
+        if (!map.has(purchaseId)) map.set(purchaseId, []);
+        map.get(purchaseId).push(row);
+      }
+      return Array.from(map.entries()).map(([purchaseId, installments]) => ({
+        purchaseId,
+        installments: installments.slice().sort((a, b) => a.installment_no - b.installment_no)
+      }));
     },
 
     totals(rows) {

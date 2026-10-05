@@ -167,18 +167,29 @@ class Database {
     static async globalSearch(searchTerm) {
         const like = `%${searchTerm}%`;
         const customers = await this.query(`
-            SELECT id, customer_name, account_no, phone, cnic_no, 'customer' as result_type
-            FROM customers
-            WHERE customer_name LIKE ? OR account_no LIKE ? OR phone LIKE ? OR cnic_no LIKE ?
+            SELECT DISTINCT c.id, c.customer_name, c.account_no, c.phone, c.cnic_no, 'customer' as result_type
+            FROM customers c
+            LEFT JOIN customer_purchases cp ON cp.customer_id = c.id AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+            LEFT JOIN stock s ON s.id = cp.stock_id
+            WHERE c.customer_name LIKE ?
+               OR c.account_no LIKE ?
+               OR c.phone LIKE ?
+               OR c.cnic_no LIKE ?
+               OR s.engine_no LIKE ?
+               OR s.chassis_no LIKE ?
+               OR s.stock_no LIKE ?
+               OR s.imei LIKE ?
+               OR s.serial_no LIKE ?
+               OR s.reg_no LIKE ?
             LIMIT 8
-        `, [like, like, like, like]);
+        `, [like, like, like, like, like, like, like, like, like, like]);
         const stock = await this.query(`
-            SELECT s.id, p.item_name, s.engine_no, s.chassis_no, s.imei, s.serial_no, s.reg_no, 'stock' as result_type
+            SELECT s.id, p.item_name, s.engine_no, s.chassis_no, s.imei, s.serial_no, s.reg_no, s.stock_no, 'stock' as result_type
             FROM stock s
             JOIN products p ON p.id = s.product_id
-            WHERE s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.imei LIKE ? OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR p.item_name LIKE ?
+            WHERE s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.imei LIKE ? OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR s.stock_no LIKE ? OR p.item_name LIKE ?
             LIMIT 8
-        `, [like, like, like, like, like, like]);
+        `, [like, like, like, like, like, like, like]);
         return { customers: customers || [], stock: stock || [] };
     }
 
@@ -196,10 +207,14 @@ class Database {
                OR c.phone LIKE ?
                OR s.engine_no LIKE ?
                OR s.chassis_no LIKE ?
+               OR s.stock_no LIKE ?
+               OR s.imei LIKE ?
+               OR s.serial_no LIKE ?
+               OR s.reg_no LIKE ?
                OR g.name LIKE ?
                OR g.phone LIKE ?
                OR g.cnic_no LIKE ?
-        `, [like, like, like, like, like, like, like, like, like]);
+        `, [like, like, like, like, like, like, like, like, like, like, like, like, like]);
     }
 
     // Guarantors
@@ -327,6 +342,15 @@ class Database {
                 (SELECT SUM(amount) FROM payments WHERE installment_id = i.id AND (notes LIKE '%discount%' OR notes LIKE '%Discount%')) as discount_amount,
                 cp.id AS purchase_id,
                 cp.customer_id,
+                cp.sale_price,
+                cp.purchase_price,
+                cp.profit_amount,
+                cp.profit_percentage,
+                cp.advance_received,
+                cp.total_amount,
+                cp.installment_months,
+                cp.monthly_installment,
+                cp.status AS purchase_status,
                 c.account_no,
                 c.cnic_no,
                 p.item_name,
@@ -335,6 +359,7 @@ class Database {
                 s.chassis_no,
                 s.imei,
                 s.serial_no,
+                s.stock_no,
                 s.quantity
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id

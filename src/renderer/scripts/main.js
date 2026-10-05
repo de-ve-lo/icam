@@ -739,7 +739,7 @@ class App {
                 </button>`);
             });
             (stock || []).forEach((s) => {
-                const ident = s.imei || s.serial_no || s.engine_no || s.chassis_no || s.reg_no || '';
+                const ident = s.stock_no || s.imei || s.serial_no || s.engine_no || s.chassis_no || s.reg_no || '';
                 items.push(`<button type="button" class="global-search-item" data-kind="stock" data-id="${s.id}">
                     <strong>${s.item_name || 'Stock'}</strong>
                     <small>${ident}</small>

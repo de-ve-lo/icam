@@ -51,8 +51,8 @@ class DatabaseManager {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         product_id INTEGER NOT NULL,
         supplier_id INTEGER NOT NULL,
-        engine_no TEXT NOT NULL UNIQUE,
-        chassis_no TEXT NOT NULL UNIQUE,
+        engine_no TEXT UNIQUE,
+        chassis_no TEXT UNIQUE,
         stock_date DATE NOT NULL,
         stock_no TEXT NOT NULL,
         is_sold BOOLEAN DEFAULT 0,
@@ -339,6 +339,7 @@ class DatabaseManager {
         console.log('Migration applied: stock.quantity');
       }
       await this.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_imei ON stock(imei) WHERE imei IS NOT NULL');
+      await this.makeStockIdentifiersNullable();
 
       await this.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -377,6 +378,53 @@ class DatabaseManager {
 
     } catch (e) {
       console.error('Migration error:', e);
+    }
+  }
+
+  async makeStockIdentifiersNullable() {
+    const info = await this.query('PRAGMA table_info(stock)');
+    if (!Array.isArray(info) || info.length === 0) return;
+    const engine = info.find((col) => col.name === 'engine_no');
+    const chassis = info.find((col) => col.name === 'chassis_no');
+    if (!engine || !chassis) return;
+    if (engine.notnull === 0 && chassis.notnull === 0) return;
+
+    const columns = info.map((col) => col.name);
+    const columnList = columns.join(', ');
+    this.db.exec('PRAGMA foreign_keys = OFF');
+    this.db.exec('BEGIN');
+    try {
+      this.db.exec(`
+        CREATE TABLE stock_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          product_id INTEGER NOT NULL,
+          supplier_id INTEGER NOT NULL,
+          engine_no TEXT UNIQUE,
+          chassis_no TEXT UNIQUE,
+          stock_date DATE NOT NULL,
+          stock_no TEXT NOT NULL,
+          is_sold BOOLEAN DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          imei TEXT,
+          reg_no TEXT,
+          serial_no TEXT,
+          quantity INTEGER DEFAULT 1,
+          FOREIGN KEY (product_id) REFERENCES products (id),
+          FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
+        )
+      `);
+      this.db.exec(`INSERT INTO stock_new (${columnList}) SELECT ${columnList} FROM stock`);
+      this.db.exec('DROP TABLE stock');
+      this.db.exec('ALTER TABLE stock_new RENAME TO stock');
+      this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_imei ON stock(imei) WHERE imei IS NOT NULL');
+      this.db.exec('COMMIT');
+      console.log('Migration applied: stock.engine_no and stock.chassis_no nullable');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
