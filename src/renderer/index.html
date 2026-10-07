@@ -49,7 +49,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <button id="hamburger-btn" class="btn btn-secondary hamburger" type="button" aria-label="Toggle menu">
+                <button id="hamburger-btn" class="btn btn-secondary hamburger" type="button" aria-label="Toggle menu" aria-expanded="false">
                     <i class="fas fa-bars"></i>
                 </button>
                 <div class="logo">
@@ -61,6 +61,10 @@
                     <div id="global-search-results" class="global-search-results hidden"></div>
                 </div>
                     <div class="header-actions">
+                        <button id="refresh-page-btn" class="btn btn-secondary" type="button" title="Refresh current page">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
+                        </button>
                         <button id="calculator-btn" class="btn btn-primary" title="Open Installment Calculator">
                             <i class="fas fa-calculator"></i>
                             Calculator
@@ -138,6 +142,12 @@
                     <a href="#expenses" class="nav-link" data-section="expenses">
                         <i class="fas fa-receipt"></i>
                         <span>Expenses</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#staff" class="nav-link" data-section="staff">
+                        <i class="fas fa-id-badge"></i>
+                        <span>Staff Salary</span>
                     </a>
                 </li>
                 <li class="nav-item">
@@ -423,6 +433,36 @@
                 </div>
             </section>
 
+            <section id="staff-section" class="content-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-id-badge"></i> Staff Salary</h2>
+                    <div class="header-actions">
+                        <button id="add-staff-btn" class="btn btn-primary" type="button">
+                            <i class="fas fa-plus"></i>
+                            Add Staff
+                        </button>
+                    </div>
+                </div>
+                <p class="text-muted">Advances reduce remaining salary for the month. Both advances and salary count as expenses in the cash book, and appear separately in the Universal report.</p>
+                <div class="table-container">
+                    <table class="data-table" id="staff-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Monthly salary</th>
+                                <th>Advances this month</th>
+                                <th>Remaining</th>
+                                <th>Collected this month</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
             <!-- Dues & Reminders Section -->
             <section id="dues-reminders-section" class="content-section">
                 <div class="section-header">
@@ -554,6 +594,31 @@
                         <p>Sales profit minus discounts and expenses</p>
                         <button class="btn btn-primary" onclick="window.reports.generate('profit')">Generate</button>
                     </div>
+                    <div class="report-card">
+                        <h3>Upcoming Dues</h3>
+                        <p>Installments due in the next 7 or 30 days</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('upcoming')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Defaulter List</h3>
+                        <p>Unpaid installments with days overdue</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('defaulters')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Supplier Ledger</h3>
+                        <p>Purchases, payments, and balance owed</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('ledger')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Purchase-wise Remaining</h3>
+                        <p>One remaining total per installment schedule</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('purchase-remaining')">Generate</button>
+                    </div>
+                    <div class="report-card">
+                        <h3>Universal Report</h3>
+                        <p>Sales, expenses, and staff salaries in one print</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('universal')">Generate</button>
+                    </div>
                 </div>
                 <div id="reports-output" class="reports-output"></div>
             </section>
@@ -623,6 +688,45 @@
                         <button class="btn btn-primary" type="submit">Save settings</button>
                     </div>
                 </form>
+                <div class="card" id="backup-settings-card">
+                    <div class="card-body">
+                        <h3>Backup and Restore</h3>
+                        <p>Save a copy of the shop database, or restore from a file. Restore is admin only and replaces current data.</p>
+                        <div class="header-actions">
+                            <button class="btn btn-secondary" type="button" id="settings-backup-btn">Backup to file</button>
+                            <button class="btn btn-warning" type="button" id="settings-restore-btn" data-admin-only>Restore from file</button>
+                        </div>
+                        <h4>Google Drive (Desktop app)</h4>
+                        <ol>
+                            <li>Install Google Drive for Desktop from google.com/drive/download and sign in.</li>
+                            <li>Wait until My Drive appears as a real folder on this PC.</li>
+                            <li>Click Choose Drive folder and pick that folder, or a subfolder such as My Drive/ICAM Backups.</li>
+                            <li>Use Backup to Drive. Drive uploads the file when it is online.</li>
+                        </ol>
+                        <p id="drive-folder-path" class="text-muted">No Drive folder selected.</p>
+                        <div class="header-actions">
+                            <button class="btn btn-secondary" type="button" id="pick-drive-folder-btn" data-admin-only>Choose Drive folder</button>
+                            <button class="btn btn-primary" type="button" id="drive-backup-btn">Backup to Drive</button>
+                            <button class="btn btn-warning" type="button" id="drive-restore-btn" data-admin-only>Restore from Drive</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <h3>WhatsApp reminders</h3>
+                        <ol>
+                            <li>Install WhatsApp Desktop or keep WhatsApp on your phone.</li>
+                            <li>Save each customer phone. Local numbers like 0300... are sent as 92... without the leading 0.</li>
+                            <li>Click Remind on WhatsApp on Upcoming Dues, Defaulter list, or a customer. A chat opens with the message filled in. You tap Send.</li>
+                        </ol>
+                        <p>Placeholders: {name} {account} {amount} {due_date} {shop}</p>
+                        <div class="form-group">
+                            <label class="form-label">Message template</label>
+                            <textarea id="whatsapp-template-input" class="form-input" rows="3"></textarea>
+                        </div>
+                        <button class="btn btn-primary" type="button" id="save-whatsapp-template-btn">Save template</button>
+                    </div>
+                </div>
             </section>
         </main>
     </div>
@@ -651,6 +755,8 @@
     <script src="scripts/cash-sales.js"></script>
     <script src="scripts/supplier-payments.js"></script>
     <script src="scripts/expenses.js"></script>
+    <script src="scripts/staff-salary-lib.js"></script>
+    <script src="scripts/staff.js"></script>
     <script src="scripts/dues-reminders.js"></script>
     <script src="scripts/reports.js"></script>
     <script src="scripts/calculator.js"></script>

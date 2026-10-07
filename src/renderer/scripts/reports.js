@@ -128,14 +128,23 @@ class ReportsManager {
     }
 
     async getShopName() {
+        const settings = await this.getShopSettings();
+        this._shopName = (settings && settings.shop_name) || 'Installment Management';
+        return this._shopName;
+    }
+
+    async getShopSettings() {
         try {
-            const row = await Database.get('SELECT shop_name FROM shop_settings WHERE id = 1');
-            this._shopName = (row && row.shop_name) || 'Installment Management';
-            return this._shopName;
+            if (typeof Utils !== 'undefined' && Utils.getShopSettingsSafe) {
+                this._shopSettings = await Utils.getShopSettingsSafe();
+            } else {
+                this._shopSettings = await Database.getShopSettings();
+            }
         } catch (e) {
-            this._shopName = 'Installment Management';
-            return this._shopName;
+            this._shopSettings = { shop_name: 'Installment Management', phone: '', address: '', logo_path: '' };
         }
+        this._shopName = this._shopSettings.shop_name || 'Installment Management';
+        return this._shopSettings;
     }
 
     renderReport(html) {
@@ -149,10 +158,23 @@ class ReportsManager {
     }
 
     wrapPanel(title, period, inner, shopName) {
-        const name = shopName || this._shopName || 'Installment Management';
+        const settings = this._shopSettings || {};
+        const esc = (typeof Utils !== 'undefined' && Utils.escapeHtml) ? Utils.escapeHtml.bind(Utils) : (v) => String(v || '');
+        const name = esc(shopName || settings.shop_name || this._shopName || 'Installment Management');
+        const phone = esc(settings.phone || '');
+        const address = esc(settings.address || '');
+        const logoUrl = (typeof Utils !== 'undefined' && Utils.logoSrc) ? Utils.logoSrc(settings) : (settings.logo_data_url || '');
+        const logo = logoUrl
+            ? `<img class="report-shop-logo" src="${esc(logoUrl)}" alt="${name}">`
+            : '';
+        const contact = [phone, address].filter(Boolean).join(' | ');
         return `<div class="report-panel" id="report-print-area">
             <button type="button" class="btn btn-secondary print-btn" onclick="window.print()">Print Report</button>
-            <h2>${name}</h2>
+            <div class="shop-print-header">
+                ${logo}
+                <h2>${name}</h2>
+                ${contact ? `<p>${contact}</p>` : ''}
+            </div>
             <h3>${title}</h3>
             <p>Period: ${period || 'All dates'}</p>
             ${inner}
@@ -384,6 +406,7 @@ class ReportsManager {
 
     // Data collection methods
     async generate(type) {
+        await this.getShopSettings();
         switch (type) {
             case 'monthly':
                 return await this.generateMonthlyReport();
@@ -405,6 +428,16 @@ class ReportsManager {
                 return await this.generateCustomerStatement();
             case 'profit':
                 return await this.generateProfitSnapshot();
+            case 'upcoming':
+                return await this.generateUpcomingDues();
+            case 'defaulters':
+                return await this.generateDefaulterList();
+            case 'ledger':
+                return await this.generateSupplierLedger();
+            case 'purchase-remaining':
+                return await this.generatePurchaseRemaining();
+            case 'universal':
+                return await this.generateUniversalReport();
             default:
                 this.safeShowNotification('Unknown report type', 'error');
         }
@@ -424,10 +457,20 @@ class ReportsManager {
                 WHERE DATE(sale_date) BETWEEN DATE(?) AND DATE(?)
                   AND received_price > 0
             `, [range.start, range.end], [{ total_amount: 0, transaction_count: 0 }]);
+            const advances = await this.safeQuery(`
+                SELECT
+                    COALESCE(SUM(advance_received), 0) as total_amount,
+                    COUNT(*) as transaction_count
+                FROM customer_purchases
+                WHERE DATE(start_date) BETWEEN DATE(?) AND DATE(?)
+                  AND COALESCE(advance_received, 0) > 0
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+            `, [range.start, range.end], [{ total_amount: 0, transaction_count: 0 }]);
 
             return {
                 installments: { total_amount: cashCollected, transaction_count: paymentRows.length },
                 cashSales: cashSaleCollections[0] || { total_amount: 0, transaction_count: 0 },
+                advances: advances[0] || { total_amount: 0, transaction_count: 0 },
                 payments: paymentRows,
                 dateRange: `${range.start} to ${range.end}`
             };
@@ -437,6 +480,7 @@ class ReportsManager {
             return {
                 installments: { total_amount: 0, transaction_count: 0 },
                 cashSales: { total_amount: 0, transaction_count: 0 },
+                advances: { total_amount: 0, transaction_count: 0 },
                 payments: [],
                 dateRange: `${range.start} to ${range.end}`,
                 error: error.message
@@ -692,8 +736,9 @@ class ReportsManager {
     showMonthlyReport(data) {
         const hasErrors = data.error;
         const errorMessage = hasErrors ? `<div class="alert alert-danger"><strong>Warning:</strong> Some data could not be loaded: ${data.error}</div>` : '';
-        const totalCollections = (data.installments.total_amount || 0) + (data.cashSales.total_amount || 0);
-        const totalTransactions = (data.installments.transaction_count || 0) + (data.cashSales.transaction_count || 0);
+        const advances = data.advances || { total_amount: 0, transaction_count: 0 };
+        const totalCollections = (data.installments.total_amount || 0) + (data.cashSales.total_amount || 0) + (advances.total_amount || 0);
+        const totalTransactions = (data.installments.transaction_count || 0) + (data.cashSales.transaction_count || 0) + (advances.transaction_count || 0);
         if (totalCollections === 0 && !hasErrors) {
             this.renderReport(this.emptyReport('Monthly Collection Report'));
             return;
@@ -710,6 +755,11 @@ class ReportsManager {
                     <h4>Installment Collections</h4>
                     <div class="amount">${this.safeFormatCurrency(data.installments.total_amount || 0)}</div>
                     <p>${data.installments.transaction_count || 0} payments</p>
+                </div>
+                <div class="summary-card">
+                    <h4>Advances</h4>
+                    <div class="amount">${this.safeFormatCurrency(advances.total_amount || 0)}</div>
+                    <p>${advances.transaction_count || 0} advances</p>
                 </div>
                 <div class="summary-card">
                     <h4>Cash Sales</h4>
@@ -1046,6 +1096,16 @@ class ReportsManager {
                   AND received_price > 0
                 ORDER BY cs.sale_date
             `, [range.start, range.end], []);
+            const advances = await this.safeQuery(`
+                SELECT cp.start_date as entry_date, cp.advance_received as amount, 'Advance' as source,
+                       COALESCE(c.customer_name, c.account_no, 'Customer') as party
+                FROM customer_purchases cp
+                LEFT JOIN customers c ON cp.customer_id = c.id
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
+                  AND COALESCE(cp.advance_received, 0) > 0
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                ORDER BY cp.start_date
+            `, [range.start, range.end], []);
             const expenses = await this.safeQuery(`
                 SELECT e.date as entry_date, e.amount, et.name as source, e.notes as party
                 FROM expenses e
@@ -1061,7 +1121,8 @@ class ReportsManager {
                 ORDER BY sp.payment_date
             `, [range.start, range.end], []);
             const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
-            const inflows = cashCollected + cashSales.reduce((s, r) => s + (r.amount || 0), 0);
+            const advanceTotal = advances.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+            const inflows = cashCollected + cashSales.reduce((s, r) => s + (r.amount || 0), 0) + advanceTotal;
             const outflows = expenses.reduce((s, r) => s + (r.amount || 0), 0)
                 + supplierPays.reduce((s, r) => s + (r.amount || 0), 0);
             if (inflows === 0 && outflows === 0) {
@@ -1070,6 +1131,7 @@ class ReportsManager {
             }
             const rows = [
                 ...paymentRows.map((p) => ({ date: p.payment_date, source: 'Installment', party: p.receipt_no || '', amount: p.amount, kind: 'in' })),
+                ...advances.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'in' })),
                 ...cashSales.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'in' })),
                 ...expenses.map((r) => ({ date: r.entry_date, source: r.source, party: r.party || '', amount: r.amount, kind: 'out' })),
                 ...supplierPays.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'out' }))
@@ -1192,11 +1254,11 @@ class ReportsManager {
 
     async generateCustomerStatement() {
         try {
-            this.safeShowLoading();
             const customerId = await this.promptCustomerId();
             if (!customerId) {
                 return;
             }
+            this.safeShowLoading();
             const shopName = await this.getShopName();
             const customer = await Database.get('SELECT * FROM customers WHERE id = ?', [customerId]);
             if (!customer) {
@@ -1228,7 +1290,17 @@ class ReportsManager {
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
             `, [customerId], [{ remaining: 0 }]);
             const remaining = (remainingRows[0] && remainingRows[0].remaining) || 0;
+            let photoHtml = '';
+            if (customer.photo_path && window._ipcRenderer) {
+                try {
+                    const photo = await window._ipcRenderer.invoke('customer-photo-url', customer.photo_path);
+                    if (photo && photo.ok && photo.data_url) {
+                        photoHtml = `<img class="report-shop-logo" src="${photo.data_url}" alt="Customer">`;
+                    }
+                } catch (_) { /* optional */ }
+            }
             const inner = `
+                ${photoHtml}
                 <p><strong>Customer:</strong> ${customer.customer_name || ''} &nbsp;
                    <strong>Account:</strong> ${customer.account_no || 'N/A'} &nbsp;
                    <strong>Phone:</strong> ${customer.phone || 'N/A'}</p>
@@ -1292,13 +1364,52 @@ class ReportsManager {
             this.safeShowNotification('No customers found', 'error');
             return null;
         }
-        const listed = customers.slice(0, 20).map((c) => `${c.id}: ${c.customer_name} (${c.account_no || c.phone || '-'})`).join('\n');
-        const entered = typeof window !== 'undefined' && window.prompt
-            ? window.prompt(`Enter customer id:\n${listed}${customers.length > 20 ? '\n...' : ''}`)
-            : null;
-        if (!entered) return null;
-        const id = parseInt(entered, 10);
-        return Number.isFinite(id) ? id : null;
+        if (typeof app === 'undefined' || typeof app.showModal !== 'function') {
+            this.safeShowNotification('Customer picker is unavailable', 'error');
+            return null;
+        }
+        return await new Promise((resolve) => {
+            const options = customers.map((c) => {
+                const label = `${c.customer_name || 'Customer'} (${c.account_no || c.phone || c.id})`;
+                return `<option value="${c.id}">${Utils.escapeHtml ? Utils.escapeHtml(label) : label}</option>`;
+            }).join('');
+            const html = `
+                <div class="modal">
+                    <div class="modal-content modal-sm">
+                        <div class="modal-header">
+                            <h3>Select Customer</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label class="form-label">Customer</label>
+                                <select id="statement-customer-id" class="form-input">${options}</select>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" id="statement-cancel-btn">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="statement-ok-btn">Generate</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            app.showModal(html);
+            let settled = false;
+            const originalClose = typeof app.closeModal === 'function' ? app.closeModal.bind(app) : () => {};
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                app.closeModal = originalClose;
+                originalClose();
+                resolve(Number.isFinite(value) ? value : null);
+            };
+            app.closeModal = () => finish(null);
+            const select = document.getElementById('statement-customer-id');
+            const okBtn = document.getElementById('statement-ok-btn');
+            const cancelBtn = document.getElementById('statement-cancel-btn');
+            if (okBtn) okBtn.addEventListener('click', () => finish(select ? parseInt(select.value, 10) : null));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => finish(null));
+        });
     }
 
     async generateProfitSnapshot() {
@@ -1376,6 +1487,466 @@ class ReportsManager {
         }
     }
     
+    whatsAppButton(phone, values) {
+        if (typeof Utils === 'undefined' || !Utils.whatsAppUrl) return '';
+        const settings = this._shopSettings || {};
+        const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
+        const text = Utils.fillWhatsAppTemplate(template, {
+            name: values.name || '',
+            account: values.account || '',
+            amount: values.amount || '',
+            due_date: values.due_date || '',
+            shop: settings.shop_name || this._shopName || ''
+        });
+        const url = Utils.whatsAppUrl(phone, text);
+        if (!url) return '';
+        return `<a class="btn btn-sm btn-success" href="${url}" target="_blank" rel="noopener">WhatsApp</a>`;
+    }
+
+    async generateUpcomingDues() {
+        try {
+            this.safeShowLoading();
+            const today = this.formatDateForInput(new Date());
+            const end7 = this.formatDateForInput(new Date(Date.now() + 7 * 86400000));
+            const end30 = this.formatDateForInput(new Date(Date.now() + 30 * 86400000));
+            const rows = await this.safeQuery(`
+                SELECT
+                    i.id, i.installment_no, i.due_date,
+                    COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) as remaining,
+                    CAST(julianday(i.due_date) - julianday(?) AS INTEGER) as days_until,
+                    c.customer_name, c.account_no, c.phone,
+                    COALESCE(p.item_name, '') as item_name
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                JOIN customers c ON cp.customer_id = c.id
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                  AND DATE(i.due_date) >= DATE(?)
+                  AND DATE(i.due_date) <= DATE(?)
+                  AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
+                ORDER BY i.due_date, c.customer_name
+            `, [today, today, end30], []);
+            if (!rows.length) {
+                this.renderReport(this.emptyReport('Upcoming Dues'));
+                return;
+            }
+            const in7 = rows.filter((r) => Number(r.days_until) <= 7);
+            const table = (list) => `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Due date</th>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Account</th>
+                            <th>Item</th>
+                            <th>#</th>
+                            <th>Remaining</th>
+                            <th>Days until due</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${list.map((r) => `
+                            <tr>
+                                <td>${this.safeFormatDate(r.due_date)}</td>
+                                <td>${r.customer_name || ''}</td>
+                                <td>${r.phone || ''}</td>
+                                <td>${r.account_no || ''}</td>
+                                <td>${r.item_name || ''}</td>
+                                <td>${r.installment_no}</td>
+                                <td>${this.safeFormatCurrency(r.remaining)}</td>
+                                <td>${r.days_until}</td>
+                                <td>${this.whatsAppButton(r.phone, {
+                                    name: r.customer_name,
+                                    account: r.account_no,
+                                    amount: this.safeFormatCurrency(r.remaining),
+                                    due_date: r.due_date
+                                })}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+            const inner = `
+                <h4>Next 7 days (${end7})</h4>
+                ${in7.length ? table(in7) : '<p class="text-muted">No dues in the next 7 days.</p>'}
+                <h4>Next 30 days</h4>
+                ${table(rows)}
+            `;
+            this.renderReport(this.wrapPanel('Upcoming Dues', `${today} to ${end30}`, inner));
+        } catch (error) {
+            console.error(error);
+            this.safeShowNotification('Failed to generate upcoming dues', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async generateDefaulterList() {
+        try {
+            this.safeShowLoading();
+            const today = this.formatDateForInput(new Date());
+            const rows = await this.safeQuery(`
+                SELECT
+                    i.id, i.installment_no, i.due_date,
+                    COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) as remaining,
+                    CAST(julianday(?) - julianday(i.due_date) AS INTEGER) as days_overdue,
+                    c.customer_name, c.account_no, c.phone, c.id as customer_id,
+                    COALESCE(p.item_name, '') as item_name,
+                    (SELECT MAX(pay.payment_date) FROM payments pay
+                        WHERE pay.customer_id = c.id
+                          AND (pay.type IS NULL OR pay.type = 'payment')
+                          AND (pay.is_deleted = 0 OR pay.is_deleted IS NULL)) as last_payment_date
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                JOIN customers c ON cp.customer_id = c.id
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                  AND DATE(i.due_date) < DATE(?)
+                  AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
+                ORDER BY days_overdue DESC, c.customer_name
+            `, [today, today], []);
+            if (!rows.length) {
+                this.renderReport(this.emptyReport('Defaulter List'));
+                return;
+            }
+            const inner = `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Account</th>
+                            <th>Item</th>
+                            <th>#</th>
+                            <th>Due date</th>
+                            <th>Days overdue</th>
+                            <th>Remaining</th>
+                            <th>Last payment</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r) => `
+                            <tr>
+                                <td>${r.customer_name || ''}</td>
+                                <td>${r.phone || ''}</td>
+                                <td>${r.account_no || ''}</td>
+                                <td>${r.item_name || ''}</td>
+                                <td>${r.installment_no}</td>
+                                <td>${this.safeFormatDate(r.due_date)}</td>
+                                <td>${r.days_overdue}</td>
+                                <td>${this.safeFormatCurrency(r.remaining)}</td>
+                                <td>${r.last_payment_date ? this.safeFormatDate(r.last_payment_date) : '-'}</td>
+                                <td>${this.whatsAppButton(r.phone, {
+                                    name: r.customer_name,
+                                    account: r.account_no,
+                                    amount: this.safeFormatCurrency(r.remaining),
+                                    due_date: r.due_date
+                                })}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Defaulter List', today, inner));
+        } catch (error) {
+            console.error(error);
+            this.safeShowNotification('Failed to generate defaulter list', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async generateSupplierLedger() {
+        try {
+            this.safeShowLoading();
+            const range = this.getLocalRange();
+            const suppliers = await this.safeQuery('SELECT id, supplier_name FROM suppliers ORDER BY supplier_name', [], []);
+            if (!suppliers.length) {
+                this.renderReport(this.emptyReport('Supplier Ledger'));
+                return;
+            }
+            const sections = [];
+            for (const supplier of suppliers) {
+                const purchases = await this.safeQuery(`
+                    SELECT s.stock_date as entry_date, COALESCE(pr.purchase_price, 0) as amount,
+                           'Purchase' as particular, COALESCE(pr.item_name, s.stock_no) as detail
+                    FROM stock s
+                    JOIN products pr ON s.product_id = pr.id
+                    WHERE s.supplier_id = ?
+                      AND DATE(s.stock_date) BETWEEN DATE(?) AND DATE(?)
+                    ORDER BY s.stock_date
+                `, [supplier.id, range.start, range.end], []);
+                const payments = await this.safeQuery(`
+                    SELECT payment_date as entry_date, amount, 'Payment' as particular, COALESCE(notes, '') as detail
+                    FROM supplier_payments
+                    WHERE supplier_id = ?
+                      AND DATE(payment_date) BETWEEN DATE(?) AND DATE(?)
+                    ORDER BY payment_date
+                `, [supplier.id, range.start, range.end], []);
+                const openingPurchases = await this.safeQuery(`
+                    SELECT COALESCE(SUM(pr.purchase_price), 0) as total
+                    FROM stock s JOIN products pr ON s.product_id = pr.id
+                    WHERE s.supplier_id = ? AND DATE(s.stock_date) < DATE(?)
+                `, [supplier.id, range.start], [{ total: 0 }]);
+                const openingPays = await this.safeQuery(`
+                    SELECT COALESCE(SUM(amount), 0) as total
+                    FROM supplier_payments
+                    WHERE supplier_id = ? AND DATE(payment_date) < DATE(?)
+                `, [supplier.id, range.start], [{ total: 0 }]);
+                let balance = (Number(openingPurchases[0] && openingPurchases[0].total) || 0)
+                    - (Number(openingPays[0] && openingPays[0].total) || 0);
+                const rows = [
+                    ...purchases.map((r) => ({ ...r, inAmt: Number(r.amount) || 0, outAmt: 0 })),
+                    ...payments.map((r) => ({ ...r, inAmt: 0, outAmt: Number(r.amount) || 0 }))
+                ].sort((a, b) => String(a.entry_date).localeCompare(String(b.entry_date)));
+                if (!rows.length && balance === 0) continue;
+                const opening = balance;
+                const body = rows.map((r) => {
+                    balance += r.inAmt - r.outAmt;
+                    return `<tr>
+                        <td>${this.safeFormatDate(r.entry_date)}</td>
+                        <td>${r.particular}${r.detail ? ' — ' + r.detail : ''}</td>
+                        <td>${r.inAmt ? this.safeFormatCurrency(r.inAmt) : ''}</td>
+                        <td>${r.outAmt ? this.safeFormatCurrency(r.outAmt) : ''}</td>
+                        <td>${this.safeFormatCurrency(balance)}</td>
+                    </tr>`;
+                }).join('');
+                sections.push(`
+                    <h4>${supplier.supplier_name}</h4>
+                    <p>Opening: ${this.safeFormatCurrency(opening)} | Closing: ${this.safeFormatCurrency(balance)}</p>
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Particular</th><th>In</th><th>Out</th><th>Balance</th></tr></thead>
+                        <tbody>${body || '<tr><td colspan="5">No movement this period</td></tr>'}</tbody>
+                    </table>
+                    </div>
+                `);
+            }
+            this.renderReport(this.wrapPanel('Supplier Ledger', `${range.start} to ${range.end}`, sections.join('') || '<p class="text-muted">No supplier activity.</p>'));
+        } catch (error) {
+            console.error(error);
+            this.safeShowNotification('Failed to generate supplier ledger', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async generatePurchaseRemaining() {
+        try {
+            this.safeShowLoading();
+            const rows = await this.safeQuery(`
+                SELECT
+                    cp.id, cp.start_date, cp.sale_price, cp.advance_received, cp.total_amount, cp.status,
+                    c.customer_name, c.account_no,
+                    COALESCE(p.item_name, '') as item_name,
+                    COALESCE(s.stock_no, '') as stock_no,
+                    COALESCE(SUM(COALESCE(i.original_amount, i.amount)), 0) as original_sum,
+                    COALESCE(SUM(COALESCE(i.paid_amount, 0)), 0) as paid_sum
+                FROM customer_purchases cp
+                JOIN customers c ON cp.customer_id = c.id
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                LEFT JOIN installments i ON i.purchase_id = cp.id AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                WHERE (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                GROUP BY cp.id
+                ORDER BY cp.start_date DESC
+            `, [], []);
+            if (!rows.length) {
+                this.renderReport(this.emptyReport('Purchase-wise Remaining'));
+                return;
+            }
+            const inner = `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Account</th>
+                            <th>Item</th>
+                            <th>Start</th>
+                            <th>Original</th>
+                            <th>Advance</th>
+                            <th>Paid</th>
+                            <th>Remaining</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r) => {
+                            const original = Number(r.original_sum) || Number(r.total_amount) || 0;
+                            const paid = Number(r.paid_sum) || 0;
+                            const remaining = Math.max(0, original - paid);
+                            return `<tr>
+                                <td>${r.customer_name || ''}</td>
+                                <td>${r.account_no || ''}</td>
+                                <td>${r.item_name || r.stock_no || ''}</td>
+                                <td>${this.safeFormatDate(r.start_date)}</td>
+                                <td>${this.safeFormatCurrency(original)}</td>
+                                <td>${this.safeFormatCurrency(r.advance_received)}</td>
+                                <td>${this.safeFormatCurrency(paid)}</td>
+                                <td>${this.safeFormatCurrency(remaining)}</td>
+                                <td>${r.status || ''}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Purchase-wise Remaining', 'All schedules', inner));
+        } catch (error) {
+            console.error(error);
+            this.safeShowNotification('Failed to generate purchase remaining', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async generateUniversalReport() {
+        try {
+            this.safeShowLoading();
+            const range = this.getLocalRange();
+            const installmentSales = await this.safeQuery(`
+                SELECT cp.start_date as sale_date, COALESCE(p.item_name, '') as item_name,
+                       'Installment' as sale_type, COALESCE(cp.advance_received, 0) as advance,
+                       MAX(0, COALESCE(cp.total_amount, 0) - COALESCE(cp.advance_received, 0)) as remaining_after_advance,
+                       COALESCE(cp.profit_amount, 0) as profit
+                FROM customer_purchases cp
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                ORDER BY cp.start_date
+            `, [range.start, range.end], []);
+            const cashSales = await this.safeQuery(`
+                SELECT cs.sale_date, COALESCE(p.item_name, '') as item_name,
+                       'Cash' as sale_type, COALESCE(cs.received_price, 0) as advance,
+                       COALESCE(cs.due_amount, 0) as remaining_after_advance,
+                       COALESCE(cs.agreed_price, 0) - COALESCE(p.purchase_price, 0) as profit
+                FROM cash_sales cs
+                JOIN stock s ON cs.stock_id = s.id
+                JOIN products p ON s.product_id = p.id
+                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
+                ORDER BY cs.sale_date
+            `, [range.start, range.end], []);
+            const sales = [...installmentSales, ...cashSales].sort((a, b) => String(a.sale_date).localeCompare(String(b.sale_date)));
+            const expenses = await this.safeQuery(`
+                SELECT e.date, et.name as expense_name, e.amount
+                FROM expenses e
+                JOIN expense_types et ON e.expense_type_id = et.id
+                WHERE DATE(e.date) BETWEEN DATE(?) AND DATE(?)
+                  AND et.name != 'Staff Salary'
+                ORDER BY e.date
+            `, [range.start, range.end], []);
+            const salaries = await this.safeQuery(`
+                SELECT se.entry_date, st.name as staff_name, se.amount, se.type, se.month
+                FROM staff_salary_entries se
+                JOIN staff st ON se.staff_id = st.id
+                WHERE DATE(se.entry_date) BETWEEN DATE(?) AND DATE(?)
+                ORDER BY se.entry_date, st.name
+            `, [range.start, range.end], []);
+
+            const sumCol = (list, key) => list.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+            const salesHtml = `
+                <h4>Items sold</h4>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th><th>Item</th><th>Type</th>
+                            <th>Advance</th><th>Remaining after advance</th><th>Profit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${sales.map((r) => `
+                            <tr>
+                                <td>${this.safeFormatDate(r.sale_date)}</td>
+                                <td>${r.item_name || ''}</td>
+                                <td>${r.sale_type}</td>
+                                <td>${this.safeFormatCurrency(r.advance)}</td>
+                                <td>${this.safeFormatCurrency(r.remaining_after_advance)}</td>
+                                <td>${this.safeFormatCurrency(r.profit)}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="6">No sales</td></tr>'}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3"><strong>Total</strong></td>
+                            <td><strong>${this.safeFormatCurrency(sumCol(sales, 'advance'))}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(sumCol(sales, 'remaining_after_advance'))}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(sumCol(sales, 'profit'))}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                </div>
+            `;
+            const expHtml = `
+                <h4>Expenses</h4>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Date</th><th>Expense name</th><th>Amount</th></tr></thead>
+                    <tbody>
+                        ${expenses.map((r) => `
+                            <tr>
+                                <td>${this.safeFormatDate(r.date)}</td>
+                                <td>${r.expense_name}</td>
+                                <td>${this.safeFormatCurrency(r.amount)}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="3">No expenses</td></tr>'}
+                    </tbody>
+                    <tfoot>
+                        <tr><td colspan="2"><strong>Total</strong></td><td><strong>${this.safeFormatCurrency(sumCol(expenses, 'amount'))}</strong></td></tr>
+                    </tfoot>
+                </table>
+                </div>
+            `;
+            const byStaff = {};
+            salaries.forEach((r) => {
+                const key = r.staff_name;
+                if (!byStaff[key]) byStaff[key] = 0;
+                byStaff[key] += Number(r.amount) || 0;
+            });
+            const salHtml = `
+                <h4>Staff salaries</h4>
+                <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Date</th><th>Staff name</th><th>Amount</th><th>Type</th></tr></thead>
+                    <tbody>
+                        ${salaries.map((r) => `
+                            <tr>
+                                <td>${this.safeFormatDate(r.entry_date)}</td>
+                                <td>${r.staff_name}</td>
+                                <td>${this.safeFormatCurrency(r.amount)}</td>
+                                <td>${r.type === 'advance' ? 'Advance' : 'Salary'}</td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="4">No salary entries</td></tr>'}
+                    </tbody>
+                    <tfoot>
+                        <tr><td colspan="2"><strong>Total collected</strong></td><td colspan="2"><strong>${this.safeFormatCurrency(sumCol(salaries, 'amount'))}</strong></td></tr>
+                    </tfoot>
+                </table>
+                </div>
+                ${Object.keys(byStaff).length ? `<p>${Object.entries(byStaff).map(([n, a]) => `${n}: ${this.safeFormatCurrency(a)}`).join(' | ')}</p>` : ''}
+            `;
+            this.renderReport(this.wrapPanel('Universal Report', `${range.start} to ${range.end}`, salesHtml + expHtml + salHtml));
+        } catch (error) {
+            console.error(error);
+            this.safeShowNotification('Failed to generate universal report', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
     // Cleanup method to ensure no temporary data persists
     cleanupTempData() {
         this.tempDateRange = null;

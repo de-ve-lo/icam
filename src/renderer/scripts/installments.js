@@ -349,8 +349,6 @@ class InstallmentManager {
             statusIcon = 'fas fa-user-plus';
         }
 
-        console.log('Render customer info - installments:', this.installments.length, 'hasPurchaseId:', hasPurchaseId, 'Status:', accountStatus);
-
         return `
             <div class="card">
                 <div class="card-header">
@@ -644,6 +642,7 @@ class InstallmentManager {
         }
 
         const win = window.open('', '_blank');
+        const shopHeader = await Utils.shopPrintHeaderHtml();
         const html = `
             <!DOCTYPE html>
             <html>
@@ -661,9 +660,11 @@ class InstallmentManager {
                     .status-pending { color: #92400e; }
                     .status-partial { color: #334155; }
                     ${Utils.developerCreditCss()}
+                    ${Utils.shopPrintHeaderCss()}
                 </style>
             </head>
             <body>
+                ${shopHeader}
                 <h2>Installment Schedule</h2>
                 <div class="info">
                     <strong>Account No:</strong> ${c.account_no} &nbsp; 
@@ -766,6 +767,7 @@ class InstallmentManager {
             const totalTransaction = totalCashPaid + totalDiscount;
 
             const win = window.open('', '_blank');
+            const shopHeader = await Utils.shopPrintHeaderHtml();
             const html = `
                 <!DOCTYPE html>
                 <html>
@@ -782,9 +784,11 @@ class InstallmentManager {
                         .discount-row { color: #856404; background-color: #fff3cd; }
                         .summary-section { margin-top: 20px; text-align: right; }
                         ${Utils.developerCreditCss()}
+                        ${Utils.shopPrintHeaderCss()}
                     </style>
                 </head>
                 <body>
+                    ${shopHeader}
                     <h2>Payment Receipt</h2>
                     <table>
                         <tr><th>Receipt No</th><td>${payment.receipt_no || ''}</td></tr>

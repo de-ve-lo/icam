@@ -275,6 +275,53 @@ class Utils {
         return 'Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com';
     }
 
+    static escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    static async getShopSettingsSafe() {
+        try {
+            if (typeof Database !== 'undefined' && Database.getShopSettings) {
+                return await Database.getShopSettings();
+            }
+        } catch (e) { /* use defaults */ }
+        return { shop_name: 'Installment Management', phone: '', address: '', logo_path: '' };
+    }
+
+    static logoSrc(logoPathOrSettings) {
+        if (!logoPathOrSettings) return '';
+        if (typeof logoPathOrSettings === 'object') {
+            return logoPathOrSettings.logo_data_url || Utils.logoSrc(logoPathOrSettings.logo_path);
+        }
+        const normalized = String(logoPathOrSettings).replace(/\\/g, '/');
+        if (/^(file|https|data):/i.test(normalized)) return normalized;
+        return 'file:///' + normalized.replace(/^\/+/, '');
+    }
+
+    static shopPrintHeaderCss() {
+        return `.shop-print-header{text-align:center;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid #333}
+.shop-print-header img{max-height:64px;max-width:160px;display:block;margin:0 auto 8px}
+.shop-print-header h1{margin:0 0 4px;font-size:20px}
+.shop-print-header p{margin:0;font-size:12px;color:#444}`;
+    }
+
+    static async shopPrintHeaderHtml() {
+        const s = await Utils.getShopSettingsSafe();
+        const name = Utils.escapeHtml(s.shop_name || 'Installment Management');
+        const phone = Utils.escapeHtml(s.phone || '');
+        const address = Utils.escapeHtml(s.address || '');
+        const logoUrl = Utils.logoSrc(s);
+        const logo = logoUrl
+            ? `<img src="${Utils.escapeHtml(logoUrl)}" alt="${name}">`
+            : '';
+        const lines = [phone, address].filter(Boolean).join(' | ');
+        return `<div class="shop-print-header">${logo}<h1>${name}</h1>${lines ? `<p>${lines}</p>` : ''}</div>`;
+    }
+
     // Print utilities
     static printElement(elementId, title = 'Print Document') {
         const element = document.getElementById(elementId);
@@ -332,7 +379,34 @@ class Utils {
             }
         };
     }
+
+    static toWhatsAppDigits(phone) {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (!digits) return '';
+        if (digits.startsWith('92')) return digits;
+        if (digits.startsWith('0')) return '92' + digits.slice(1);
+        if (digits.length === 10) return '92' + digits;
+        return digits;
+    }
+
+    static fillWhatsAppTemplate(template, values) {
+        const source = String(template || '');
+        const data = values || {};
+        return source.replace(/\{(name|account|amount|due_date|shop)\}/g, (_, key) => {
+            return data[key] != null ? String(data[key]) : '';
+        });
+    }
+
+    static whatsAppUrl(phone, text) {
+        const digits = Utils.toWhatsAppDigits(phone);
+        if (!digits) return '';
+        return 'https://wa.me/' + digits + '?text=' + encodeURIComponent(text || '');
+    }
 }
 
-// Export to window
-window.Utils = Utils;
+if (typeof window !== 'undefined') {
+    window.Utils = Utils;
+}
+if (typeof module === 'object' && module.exports) {
+    module.exports = { Utils };
+}

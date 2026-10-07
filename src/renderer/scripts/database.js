@@ -1458,6 +1458,65 @@ class Database {
             WHERE i.id = ?
         `, [installmentId]);
     }
+
+    static async getStaff() {
+        return await this.safeQuery('SELECT * FROM staff ORDER BY name ASC', [], []);
+    }
+
+    static async addStaff(staff) {
+        return await this.run(
+            'INSERT INTO staff (name, phone, monthly_salary, status, join_date) VALUES (?, ?, ?, ?, ?)',
+            [staff.name, staff.phone || '', Number(staff.monthly_salary) || 0, staff.status || 'active', staff.join_date || null]
+        );
+    }
+
+    static async updateStaff(staff) {
+        return await this.run(
+            'UPDATE staff SET name = ?, phone = ?, monthly_salary = ?, status = ?, join_date = ? WHERE id = ?',
+            [staff.name, staff.phone || '', Number(staff.monthly_salary) || 0, staff.status || 'active', staff.join_date || null, staff.id]
+        );
+    }
+
+    static async getStaffEntries(staffId, month) {
+        if (staffId && month) {
+            return await this.safeQuery(
+                'SELECT * FROM staff_salary_entries WHERE staff_id = ? AND month = ? ORDER BY entry_date, id',
+                [staffId, month],
+                []
+            );
+        }
+        if (staffId) {
+            return await this.safeQuery(
+                'SELECT * FROM staff_salary_entries WHERE staff_id = ? ORDER BY entry_date DESC, id DESC',
+                [staffId],
+                []
+            );
+        }
+        return await this.safeQuery('SELECT * FROM staff_salary_entries ORDER BY entry_date DESC, id DESC', [], []);
+    }
+
+    static async getStaffSalaryTypeId() {
+        let row = await this.get("SELECT id FROM expense_types WHERE name = 'Staff Salary'");
+        if (!row) {
+            await this.run("INSERT INTO expense_types (name, description) VALUES ('Staff Salary', 'Staff salary and salary advances')");
+            row = await this.get("SELECT id FROM expense_types WHERE name = 'Staff Salary'");
+        }
+        return row ? row.id : null;
+    }
+
+    static async addStaffSalaryEntry(entry) {
+        const typeId = await this.getStaffSalaryTypeId();
+        const exp = await this.addExpense({
+            expense_type_id: typeId,
+            amount: entry.amount,
+            date: entry.entry_date,
+            notes: `${entry.type === 'advance' ? 'Salary advance' : 'Salary'} - ${entry.staff_name || ''} ${entry.notes || ''}`.trim()
+        });
+        return await this.run(
+            'INSERT INTO staff_salary_entries (staff_id, entry_date, type, amount, month, notes, expense_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [entry.staff_id, entry.entry_date, entry.type, entry.amount, entry.month, entry.notes || '', exp && exp.id]
+        );
+    }
 }
 
 window.Database = Database;

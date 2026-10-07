@@ -7,6 +7,7 @@ class InstallmentCalculator {
         this.suppliers = [];
         this.customers = [];
         this.availableStock = [];
+        this._calcTimer = null;
     }
 
     async initialize() {
@@ -82,14 +83,14 @@ class InstallmentCalculator {
                                                 <label class="form-label required">Sale Price</label>
                                                 <div class="input-group">
                                                     <span class="input-prefix">Rs.</span>
-                                                    <input type="number" name="sale_price" class="form-input" required min="0" step="0.01" oninput="calculator.updateCalculations()">
+                                                    <input type="number" name="sale_price" class="form-input" required min="0" step="0.01" oninput="calculator.scheduleUpdateCalculations()">
                                                 </div>
                                             </div>
                                             <div class="form-group">
                                                 <label class="form-label required">Advance Payment</label>
                                                 <div class="input-group">
                                                     <span class="input-prefix">Rs.</span>
-                                                    <input type="number" name="advance_payment" class="form-input" required min="0" step="0.01" value="0" oninput="calculator.updateCalculations()">
+                                                    <input type="number" name="advance_payment" class="form-input" required min="0" step="0.01" value="0" oninput="calculator.scheduleUpdateCalculations()">
                                                 </div>
                                             </div>
                                         </div>
@@ -97,7 +98,7 @@ class InstallmentCalculator {
                                             <div class="form-group">
                                                 <label class="form-label">Custom Profit (%)</label>
                                                 <div class="input-group">
-                                                    <input type="number" name="profit_percentage" class="form-input" min="0" step="0.01" placeholder="e.g., 10" oninput="calculator.updateCalculations()">
+                                                    <input type="number" name="profit_percentage" class="form-input" min="0" step="0.01" placeholder="e.g., 10" oninput="calculator.scheduleUpdateCalculations()">
                                                     <span class="input-suffix">%</span>
                                                 </div>
                                             </div>
@@ -105,7 +106,7 @@ class InstallmentCalculator {
                                                 <label class="form-label">Custom Profit (Amount)</label>
                                                 <div class="input-group">
                                                     <span class="input-prefix">Rs.</span>
-                                                    <input type="number" name="profit_amount" class="form-input" min="0" step="0.01" placeholder="e.g., 15000" oninput="calculator.updateCalculations()">
+                                                    <input type="number" name="profit_amount" class="form-input" min="0" step="0.01" placeholder="e.g., 15000" oninput="calculator.scheduleUpdateCalculations()">
                                                 </div>
                                             </div>
                                         </div>
@@ -126,12 +127,12 @@ class InstallmentCalculator {
                                                 <label class="form-label">Custom Installment Amount</label>
                                                 <div class="input-group">
                                                     <span class="input-prefix">Rs.</span>
-                                                    <input type="number" name="custom_installment" class="form-input" min="1" step="1" placeholder="Optional" oninput="calculator.updateCalculations()">
+                                                    <input type="number" name="custom_installment" class="form-input" min="1" step="1" placeholder="Optional" oninput="calculator.scheduleUpdateCalculations()">
                                                 </div>
                                             </div>
                                             <div class="form-group">
                                                 <label class="form-label required">Start Date</label>
-                                                <input type="date" name="start_date" class="form-input" required value="${Utils.getCurrentDate('YYYY-MM-DD')}" onchange="calculator.updateCalculations()">
+                                                 <input type="date" name="start_date" class="form-input" required value="${Utils.getCurrentDate('YYYY-MM-DD')}" onchange="calculator.scheduleUpdateCalculations()">
                                             </div>
                                         </div>
                                     </div>
@@ -196,8 +197,14 @@ class InstallmentCalculator {
         this.updateCalculations();
     }
 
+    scheduleUpdateCalculations() {
+        if (this._calcTimer) clearTimeout(this._calcTimer);
+        this._calcTimer = setTimeout(() => this.updateCalculations(), 180);
+    }
+
     updateCalculations() {
         const form = document.getElementById('installment-calc-form');
+        if (!form) return;
         const formData = new FormData(form);
 
         const stockId = formData.get('stock_id');
@@ -208,7 +215,8 @@ class InstallmentCalculator {
         let profitPct = parseFloat(formData.get('profit_percentage'));
         let profitAmt = parseFloat(formData.get('profit_amount'));
         const customInstallment = parseFloat(formData.get('custom_installment'));
-        const activeField = document.activeElement ? document.activeElement.getAttribute('name') : null;
+        const activeEl = document.activeElement;
+        const activeField = (activeEl && form.contains(activeEl)) ? activeEl.getAttribute('name') : null;
 
         const stockItem = this.availableStock.find(s => String(s.id) === String(stockId));
         const product = this.products.find(p => p.id === stockItem?.product_id);
@@ -246,8 +254,8 @@ class InstallmentCalculator {
             }
             const pctEl = form.querySelector('[name="profit_percentage"]');
             const amtEl = form.querySelector('[name="profit_amount"]');
-            if (pctEl && !isNaN(profitPct)) pctEl.value = profitPct;
-            if (amtEl && !isNaN(profitAmt)) amtEl.value = profitAmt;
+            if (pctEl && !isNaN(profitPct) && activeField !== 'profit_percentage') pctEl.value = profitPct;
+            if (amtEl && !isNaN(profitAmt) && activeField !== 'profit_amount') amtEl.value = profitAmt;
         }
 
         try {
@@ -358,22 +366,28 @@ class InstallmentCalculator {
     }
 
     clearResults() {
-        document.getElementById('calc-summary').innerHTML = '<p class="text-muted">Fill in the form to see calculations</p>';
-        document.getElementById('payment-schedule').innerHTML = '<p class="text-muted">Calculation results will appear here</p>';
+        const summaryEl = document.getElementById('calc-summary');
+        const scheduleEl = document.getElementById('payment-schedule');
+        if (summaryEl) summaryEl.innerHTML = '<p class="text-muted">Fill in the form to see calculations</p>';
+        if (scheduleEl) scheduleEl.innerHTML = '<p class="text-muted">Calculation results will appear here</p>';
         this.disableActionButtons();
     }
 
     enableActionButtons() {
-        document.getElementById('print-schedule-btn').disabled = false;
-        document.getElementById('create-plan-btn').disabled = false;
+        const printBtn = document.getElementById('print-schedule-btn');
+        const createBtn = document.getElementById('create-plan-btn');
+        if (printBtn) printBtn.disabled = false;
+        if (createBtn) createBtn.disabled = false;
     }
 
     disableActionButtons() {
-        document.getElementById('print-schedule-btn').disabled = true;
-        document.getElementById('create-plan-btn').disabled = true;
+        const printBtn = document.getElementById('print-schedule-btn');
+        const createBtn = document.getElementById('create-plan-btn');
+        if (printBtn) printBtn.disabled = true;
+        if (createBtn) createBtn.disabled = true;
     }
 
-    printSchedule() {
+    async printSchedule() {
         if (!this.currentCalculation) return;
 
         const { summary, schedule, stockItem, product } = this.currentCalculation;
@@ -384,12 +398,12 @@ class InstallmentCalculator {
             return;
         }
 
-        this.generateSchedulePDF(customer, product, stockItem, summary, schedule);
+        await this.generateSchedulePDF(customer, product, stockItem, summary, schedule);
     }
 
-    generateSchedulePDF(customer, product, stockItem, summary, schedule) {
-        // Create a new window with printable content
+    async generateSchedulePDF(customer, product, stockItem, summary, schedule) {
         const printWindow = window.open('', '_blank');
+        const shopHeader = await Utils.shopPrintHeaderHtml();
         const printContent = `
             <!DOCTYPE html>
             <html>
@@ -481,6 +495,8 @@ class InstallmentCalculator {
                         border-top: 1px solid #ddd;
                         padding-top: 15px;
                     }
+                    ${Utils.developerCreditCss()}
+                    ${Utils.shopPrintHeaderCss()}
                     @media print {
                         body { margin: 0; }
                         .no-print { display: none; }
@@ -488,10 +504,7 @@ class InstallmentCalculator {
                 </style>
             </head>
             <body>
-                <div class="company-info">
-                    <h1>INSTALLMENT MANAGEMENT SYSTEM</h1>
-                    <p>Installment Payment Schedule</p>
-                </div>
+                ${shopHeader}
 
                 <div class="header">
                     <h2>Payment Schedule for ${Utils.capitalizeWords(product.item_name)}</h2>
@@ -650,19 +663,17 @@ class InstallmentCalculator {
             await Database.createInstallments(purchaseId, schedule);
 
             app.showNotification('Installment plan created successfully!', 'success');
+            this.currentCalculation = null;
+            await this.initialize();
             app.closeModal();
 
-            // Ask user if they want to print the schedule
-            setTimeout(() => {
-                const confirmPrint = confirm('Installment plan created successfully! Would you like to print the payment schedule?');
-                if (confirmPrint) {
-                    const customer = this.customers.find(c => c.id === customerId);
-                    this.generateSchedulePDF(customer, product, stockItem, summary, schedule);
-                }
-            }, 1000);
+            const confirmPrint = confirm('Installment plan created successfully! Would you like to print the payment schedule?');
+            if (confirmPrint) {
+                const customer = this.customers.find(c => c.id === customerId);
+                await this.generateSchedulePDF(customer, product, stockItem, summary, schedule);
+            }
 
-            // Refresh dashboard if we're on it
-            if (app.currentSection === 'dashboard') {
+            if (app.currentSection === 'dashboard' && app.dashboard) {
                 app.dashboard.loadData();
             }
 

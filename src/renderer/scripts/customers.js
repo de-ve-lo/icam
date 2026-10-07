@@ -168,8 +168,15 @@ class CustomerManager {
                                 <label class="form-label">Other Info</label>
                                 <textarea name="other_info" class="form-input" rows="3">${customer.other_info || ''}</textarea>
                             </div>
+                            <div class="form-group">
+                                <label class="form-label">Photos</label>
+                                <div class="header-actions">
+                                    <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'photo')">Customer photo</button>
+                                    <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic')">CNIC photo</button>
+                                </div>
+                            </div>
                             <div class="form-grid-full">
-                                <h4 style="margin:1rem 0;">Guarantors</h4>
+                                <h4>Guarantors</h4>
                                 <div id="guarantors-list" class="guarantor-list">${gRows}</div>
                                 <button type="button" class="btn btn-secondary" id="add-guarantor-btn"><i class="fas fa-plus"></i> Add Guarantor</button>
                             </div>
@@ -286,6 +293,12 @@ class CustomerManager {
                             <div class="detail-item"><label>Registration Date:</label><span>${Utils.formatDate(customer.registration_date, 'readable')}</span></div>
                             <div class="detail-item"><label>Other Info:</label><span>${customer.other_info || '-'}</span></div>
                         </div>
+                        <div class="customer-photos" id="customer-photos-${customer.id}"></div>
+                        <div class="header-actions">
+                            <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'photo')">Customer photo</button>
+                            <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic')">CNIC photo</button>
+                            ${this.whatsAppLink(customer)}
+                        </div>
                         <div style="margin-top:1rem;">
                             <h4>Guarantors</h4>
                             ${guarantors && guarantors.length ? `
@@ -329,6 +342,7 @@ class CustomerManager {
         `;
 
         app.showModal(modalHtml);
+        this.showPhotos(customer);
         try {
             const rows = await Database.getCustomerInstallments(customer.id);
             const html = rows && rows.length ? `
@@ -453,6 +467,52 @@ class CustomerManager {
         } finally {
             app.hideLoading();
         }
+    }
+
+    whatsAppLink(customer) {
+        if (typeof Utils === 'undefined' || !Utils.whatsAppUrl || !customer || !customer.phone) return '';
+        const settings = (typeof app !== 'undefined' && app._shopSettingsCache) || {};
+        const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
+        const text = Utils.fillWhatsAppTemplate(template, {
+            name: customer.customer_name || customer.account_no || '',
+            account: customer.account_no || '',
+            amount: '',
+            due_date: '',
+            shop: settings.shop_name || ''
+        });
+        const url = Utils.whatsAppUrl(customer.phone, text);
+        if (!url) return '';
+        return `<a class="btn btn-sm btn-success" href="${url}" target="_blank" rel="noopener">WhatsApp</a>`;
+    }
+
+    async pickPhoto(customerId, kind) {
+        try {
+            const result = await window._ipcRenderer.invoke('customer-photo-pick', { customerId, kind });
+            if (result && result.ok) {
+                app.showNotification(kind === 'cnic' ? 'CNIC photo saved' : 'Customer photo saved', 'success');
+                await this.loadData();
+                const updated = this.customers.find((c) => Number(c.id) === Number(customerId));
+                if (updated) this.showPhotos(updated);
+            }
+        } catch (error) {
+            app.showNotification('Could not save photo: ' + error.message, 'error');
+        }
+    }
+
+    async showPhotos(customer) {
+        const host = document.getElementById('customer-photos-' + customer.id);
+        if (!host) return;
+        const parts = [];
+        for (const [kind, path] of [['photo', customer.photo_path], ['cnic', customer.cnic_photo_path]]) {
+            if (!path) continue;
+            try {
+                const result = await window._ipcRenderer.invoke('customer-photo-url', path);
+                if (result && result.ok && result.data_url) {
+                    parts.push(`<div class="customer-photo-item"><p>${kind === 'cnic' ? 'CNIC' : 'Customer'}</p><img src="${result.data_url}" alt="${kind}"></div>`);
+                }
+            } catch (_) { /* optional */ }
+        }
+        host.innerHTML = parts.join('');
     }
 
     cleanup() {

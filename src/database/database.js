@@ -364,6 +364,41 @@ class DatabaseManager {
         idle_minutes INTEGER DEFAULT 30
       )`);
       await this.run("INSERT OR IGNORE INTO shop_settings (id, shop_name) VALUES (1, 'Installment Management')");
+      if (!(await this.columnExists('shop_settings', 'drive_folder'))) {
+        await this.run("ALTER TABLE shop_settings ADD COLUMN drive_folder TEXT DEFAULT ''");
+      }
+      if (!(await this.columnExists('shop_settings', 'whatsapp_template'))) {
+        await this.run("ALTER TABLE shop_settings ADD COLUMN whatsapp_template TEXT DEFAULT ''");
+      }
+      if (!(await this.columnExists('customers', 'photo_path'))) {
+        await this.run("ALTER TABLE customers ADD COLUMN photo_path TEXT DEFAULT ''");
+      }
+      if (!(await this.columnExists('customers', 'cnic_photo_path'))) {
+        await this.run("ALTER TABLE customers ADD COLUMN cnic_photo_path TEXT DEFAULT ''");
+      }
+
+      await this.run(`CREATE TABLE IF NOT EXISTS staff (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        monthly_salary REAL NOT NULL DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        join_date DATE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await this.run(`CREATE TABLE IF NOT EXISTS staff_salary_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        staff_id INTEGER NOT NULL,
+        entry_date DATE NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('advance','salary')),
+        amount REAL NOT NULL,
+        month TEXT NOT NULL,
+        notes TEXT,
+        expense_id INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+      )`);
+      await this.run("INSERT OR IGNORE INTO expense_types (name, description) VALUES ('Staff Salary', 'Staff salary and salary advances')");
 
       await this.run(`CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

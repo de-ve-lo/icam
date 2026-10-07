@@ -86,7 +86,12 @@ function createWindow() {
     }
   });
 
-  // Handle window closed
+  mainWindow.on('close', (event) => {
+    if (mainWindow._allowQuit) return;
+    event.preventDefault();
+    mainWindow.webContents.send('confirm-backup-quit');
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -352,18 +357,30 @@ ipcMain.handle('users-set-active', async (event, { userId, isActive } = {}) => {
 
 ipcMain.handle('shop-settings-get', async () => {
   const row = await db.get('SELECT * FROM shop_settings WHERE id = 1');
-  return row || { id: 1, shop_name: 'Installment Management', phone: '', address: '', logo_path: '', idle_minutes: 30 };
+  const settings = row || { id: 1, shop_name: 'Installment Management', phone: '', address: '', logo_path: '', idle_minutes: 30 };
+  if (settings.logo_path && fs.existsSync(settings.logo_path)) {
+    try {
+      const buf = fs.readFileSync(settings.logo_path);
+      const ext = path.extname(settings.logo_path).toLowerCase();
+      const mime = (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/png';
+      settings.logo_data_url = `data:${mime};base64,${buf.toString('base64')}`;
+    } catch (_) { /* logo optional */ }
+  }
+  return settings;
 });
 
 ipcMain.handle('shop-settings-save', async (event, settings = {}) => {
   if (!currentUser || currentUser.role !== 'admin') return { ok: false, reason: 'forbidden' };
+  const current = await db.get('SELECT drive_folder, whatsapp_template FROM shop_settings WHERE id = 1') || {};
   await db.run(
-    `UPDATE shop_settings SET shop_name = ?, phone = ?, address = ?, idle_minutes = ? WHERE id = 1`,
+    `UPDATE shop_settings SET shop_name = ?, phone = ?, address = ?, idle_minutes = ?, drive_folder = ?, whatsapp_template = ? WHERE id = 1`,
     [
       settings.shop_name || 'Installment Management',
       settings.phone || '',
       settings.address || '',
-      Number(settings.idle_minutes) > 0 ? Number(settings.idle_minutes) : 30
+      Number(settings.idle_minutes) > 0 ? Number(settings.idle_minutes) : 30,
+      settings.drive_folder != null ? settings.drive_folder : (current.drive_folder || ''),
+      settings.whatsapp_template != null ? settings.whatsapp_template : (current.whatsapp_template || '')
     ]
   );
   return { ok: true };
@@ -385,3 +402,120 @@ async function pickShopLogo() {
 
 ipcMain.handle('choose-logo', pickShopLogo);
 ipcMain.handle('shop-logo-pick', pickShopLogo);
+
+function backupFileName() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return `icam-backup-${stamp}.db`;
+}
+
+ipcMain.handle('backup-save-dialog', async () => {
+  if (!mainWindow) return { ok: false };
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save database backup',
+    defaultPath: backupFileName(),
+    filters: [{ name: 'Database', extensions: ['db'] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false };
+  const dest = await db.backup(result.filePath);
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle('restore-open-dialog', async () => {
+  if (!currentUser || currentUser.role !== 'admin' || !mainWindow) return { ok: false, reason: 'forbidden' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Restore database',
+    filters: [{ name: 'Database', extensions: ['db'] }],
+    properties: ['openFile']
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false };
+  await db.restore(result.filePaths[0]);
+  return { ok: true };
+});
+
+ipcMain.handle('db-restore', async (event, backupPath) => {
+  if (!currentUser || currentUser.role !== 'admin') return { ok: false, reason: 'forbidden' };
+  await db.restore(backupPath);
+  return { ok: true };
+});
+
+ipcMain.handle('drive-folder-pick', async () => {
+  if (!currentUser || currentUser.role !== 'admin' || !mainWindow) return { ok: false, reason: 'forbidden' };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose Google Drive backup folder',
+    properties: ['openDirectory']
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false };
+  const folder = result.filePaths[0];
+  await db.run('UPDATE shop_settings SET drive_folder = ? WHERE id = 1', [folder]);
+  return { ok: true, folder };
+});
+
+ipcMain.handle('drive-backup', async () => {
+  const settings = await db.get('SELECT drive_folder FROM shop_settings WHERE id = 1');
+  const folder = settings && settings.drive_folder;
+  if (!folder || !fs.existsSync(folder)) return { ok: false, reason: 'no-folder' };
+  const dest = path.join(folder, backupFileName());
+  await db.backup(dest);
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle('drive-list', async () => {
+  const settings = await db.get('SELECT drive_folder FROM shop_settings WHERE id = 1');
+  const folder = settings && settings.drive_folder;
+  if (!folder || !fs.existsSync(folder)) return [];
+  return fs.readdirSync(folder)
+    .filter((name) => /^icam-backup-.*\.db$/i.test(name))
+    .map((name) => {
+      const full = path.join(folder, name);
+      let mtime = 0;
+      try { mtime = fs.statSync(full).mtimeMs; } catch (_) { /* skip */ }
+      return { name, path: full, mtime };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+});
+
+ipcMain.handle('drive-restore', async (event, filePath) => {
+  if (!currentUser || currentUser.role !== 'admin') return { ok: false, reason: 'forbidden' };
+  if (!filePath || !fs.existsSync(filePath)) return { ok: false, reason: 'missing' };
+  await db.restore(filePath);
+  return { ok: true };
+});
+
+ipcMain.handle('customer-photo-pick', async (event, { customerId, kind } = {}) => {
+  if (!mainWindow || !customerId) return { ok: false };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: kind === 'cnic' ? 'Choose CNIC photo' : 'Choose customer photo',
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
+    properties: ['openFile']
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false };
+  const photosDir = path.join(app.getPath('userData'), 'photos');
+  if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
+  const ext = path.extname(result.filePaths[0]).toLowerCase() || '.jpg';
+  const dest = path.join(photosDir, `${kind === 'cnic' ? 'cnic' : 'photo'}-${customerId}${ext}`);
+  fs.copyFileSync(result.filePaths[0], dest);
+  if (kind === 'cnic') {
+    await db.run('UPDATE customers SET cnic_photo_path = ? WHERE id = ?', [dest, customerId]);
+  } else {
+    await db.run('UPDATE customers SET photo_path = ? WHERE id = ?', [dest, customerId]);
+  }
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle('customer-photo-url', async (event, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) return { ok: false };
+  try {
+    const buf = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' : 'image/png';
+    return { ok: true, data_url: `data:${mime};base64,${buf.toString('base64')}` };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('app-quit-now', async () => {
+  if (mainWindow) mainWindow._allowQuit = true;
+  app.quit();
+  return { ok: true };
+});

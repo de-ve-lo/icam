@@ -231,6 +231,7 @@ class CashSalesManager {
             }
 
             const win = window.open('', '_blank');
+            const shopHeader = await Utils.shopPrintHeaderHtml();
             const html = `
                 <!DOCTYPE html>
                 <html>
@@ -246,9 +247,11 @@ class CashSalesManager {
                         .total-row { background: #e8f4f8; font-weight: bold; }
                         .print-thanks { text-align: center; margin-top: 40px; font-size: 12px; }
                         ${Utils.developerCreditCss()}
+                        ${Utils.shopPrintHeaderCss()}
                     </style>
                 </head>
                 <body>
+                    ${shopHeader}
                     <h2>CASH SALE INVOICE</h2>
                     <div class="invoice-header">
                         <div><strong>Invoice #:</strong> CS-${sale.id.toString().padStart(6, '0')}</div>

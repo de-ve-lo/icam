@@ -84,6 +84,18 @@ class App {
         if (pickLogoBtn) {
             pickLogoBtn.addEventListener('click', () => this.pickShopLogo());
         }
+        const settingsBackupBtn = document.getElementById('settings-backup-btn');
+        if (settingsBackupBtn) settingsBackupBtn.addEventListener('click', () => this.backupToFile());
+        const settingsRestoreBtn = document.getElementById('settings-restore-btn');
+        if (settingsRestoreBtn) settingsRestoreBtn.addEventListener('click', () => this.restoreFromFile());
+        const pickDriveBtn = document.getElementById('pick-drive-folder-btn');
+        if (pickDriveBtn) pickDriveBtn.addEventListener('click', () => this.pickDriveFolder());
+        const driveBackupBtn = document.getElementById('drive-backup-btn');
+        if (driveBackupBtn) driveBackupBtn.addEventListener('click', () => this.backupToDrive());
+        const driveRestoreBtn = document.getElementById('drive-restore-btn');
+        if (driveRestoreBtn) driveRestoreBtn.addEventListener('click', () => this.restoreFromDrive());
+        const saveWaBtn = document.getElementById('save-whatsapp-template-btn');
+        if (saveWaBtn) saveWaBtn.addEventListener('click', () => this.saveWhatsAppTemplate());
 
         const hamburger = document.getElementById('hamburger-btn');
         const sidebar = document.querySelector('.sidebar');
@@ -91,17 +103,34 @@ class App {
         const closeSidebar = () => {
             if (sidebar) sidebar.classList.remove('open');
             if (backdrop) backdrop.classList.add('hidden');
+            if (hamburger) hamburger.setAttribute('aria-expanded', 'false');
+        };
+        const toggleSidebar = () => {
+            if (!sidebar) return;
+            const willOpen = !sidebar.classList.contains('open');
+            sidebar.classList.toggle('open', willOpen);
+            if (backdrop) backdrop.classList.toggle('hidden', !willOpen);
+            if (hamburger) hamburger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
         };
         if (hamburger && sidebar) {
-            hamburger.addEventListener('click', () => {
-                sidebar.classList.toggle('open');
-                if (backdrop) backdrop.classList.toggle('hidden', !sidebar.classList.contains('open'));
+            hamburger.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleSidebar();
             });
         }
         if (backdrop) backdrop.addEventListener('click', closeSidebar);
         document.querySelectorAll('.nav-link').forEach((link) => {
             link.addEventListener('click', closeSidebar);
         });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeSidebar();
+        });
+
+        const refreshBtn = document.getElementById('refresh-page-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => this.refreshCurrentSection());
+        }
 
         const searchInput = document.getElementById('global-search');
         if (searchInput) {
@@ -129,9 +158,8 @@ class App {
 
         if (window.electronAPI && window.electronAPI.on) {
             window.electronAPI.on('backup-database', () => this.createBackup());
-            window.electronAPI.on('restore-database', () => {
-                this.showNotification('Restore from File > Restore Database is not available here. Use a backup copy of the database file.', 'warning');
-            });
+            window.electronAPI.on('restore-database', () => this.restoreFromFile());
+            window.electronAPI.on('confirm-backup-quit', () => this.confirmBackupQuit());
             window.electronAPI.on('show-about', () => {
                 this.showNotification('Installment Management. Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com', 'info');
             });
@@ -176,6 +204,10 @@ class App {
             } else {
                 console.warn('⚠️  ExpensesManager not available');
             }
+
+            if (typeof StaffManager !== 'undefined') {
+                this.staff = new StaffManager();
+            }
             
             if (typeof DuesRemindersManager !== 'undefined') {
                 this.duesReminders = new DuesRemindersManager();
@@ -206,8 +238,9 @@ class App {
         }
     }
 
-    navigateToSection(section) {
-        if (this.isLoading || section === this.currentSection) return;
+    navigateToSection(section, options = {}) {
+        if (this.isLoading) return;
+        if (!options.force && section === this.currentSection) return;
         if ((section === 'users' || section === 'settings') && window.auth && !window.auth.isAdmin()) {
             this.showNotification('Admin permission required', 'error');
             return;
@@ -268,6 +301,9 @@ class App {
                     break;
                 case 'expenses':
                     await this.loadExpensesSection();
+                    break;
+                case 'staff':
+                    if (this.staff && this.staff.loadData) await this.staff.loadData();
                     break;
                 case 'dues-reminders':
                     await this.loadDuesRemindersSection();
@@ -477,44 +513,52 @@ class App {
     }
 
     showNotification(message, type = 'info', duration = 3000) {
+        let host = document.getElementById('notification-host');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'notification-host';
+            host.className = 'notification-host';
+            host.setAttribute('aria-live', 'polite');
+            document.body.appendChild(host);
+        }
+        if (type === 'error') host.setAttribute('aria-live', 'assertive');
+
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
-        notification.style.zIndex = '2147483640';
-        notification.style.position = 'fixed';
-        notification.style.top = '16px';
-        notification.style.right = '16px';
-        notification.style.maxWidth = '420px';
-        notification.style.pointerEvents = 'auto';
+        if (type === 'error') notification.setAttribute('role', 'alert');
         notification.innerHTML = `
             <div class="notification-content">
                 <i class="fas fa-${this.getNotificationIcon(type)}"></i>
                 <span>${message}</span>
-                <button class="notification-close" aria-label="Close notification">
+                <button class="notification-close" type="button" aria-label="Close notification">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
         `;
+        host.appendChild(notification);
+        requestAnimationFrame(() => notification.classList.add('is-visible'));
 
-        // Add to DOM at the end for stacking
-        document.body.appendChild(notification);
+        const remove = () => {
+            notification.classList.remove('is-visible');
+            notification.classList.add('is-leaving');
+            setTimeout(() => {
+                if (notification.parentNode) notification.remove();
+            }, 220);
+        };
 
-        // Make error notifications persistent until closed
         if (type !== 'error') {
             setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.remove();
-                }
+                if (notification.parentNode) remove();
             }, duration);
         }
 
-        // Manual close
         const closeBtn = notification.querySelector('.notification-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => notification.remove());
-        }
+        if (closeBtn) closeBtn.addEventListener('click', remove);
+    }
 
-        // Bring into view if off-screen
-        try { notification.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+    refreshCurrentSection() {
+        const section = this.currentSection || 'dashboard';
+        this.loadSectionData(section);
     }
 
     getNotificationIcon(type) {
@@ -684,6 +728,179 @@ class App {
         form.phone.value = settings.phone || '';
         form.address.value = settings.address || '';
         form.idle_minutes.value = settings.idle_minutes || 30;
+        const drivePath = document.getElementById('drive-folder-path');
+        if (drivePath) drivePath.textContent = settings.drive_folder || 'No Drive folder selected.';
+        const waInput = document.getElementById('whatsapp-template-input');
+        if (waInput) {
+            waInput.value = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
+        }
+        this._shopSettingsCache = settings;
+    }
+
+    async backupToFile() {
+        try {
+            this.showLoading();
+            const result = await window._ipcRenderer.invoke('backup-save-dialog');
+            if (result && result.ok) this.showNotification('Backup saved', 'success');
+        } catch (error) {
+            this.showNotification('Backup failed: ' + error.message, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async restoreFromFile() {
+        if (window.auth && !window.auth.isAdmin()) {
+            this.showNotification('Admin permission required', 'error');
+            return;
+        }
+        if (!window.confirm('Restore will replace the current database. Continue?')) return;
+        try {
+            this.showLoading();
+            const result = await window._ipcRenderer.invoke('restore-open-dialog');
+            if (result && result.ok) {
+                this.showNotification('Database restored. Reloading…', 'success');
+                setTimeout(() => window.location.reload(), 600);
+            }
+        } catch (error) {
+            this.showNotification('Restore failed: ' + error.message, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async pickDriveFolder() {
+        if (window.auth) window.auth.requireAdmin();
+        const result = await window._ipcRenderer.invoke('drive-folder-pick');
+        if (result && result.ok) {
+            const drivePath = document.getElementById('drive-folder-path');
+            if (drivePath) drivePath.textContent = result.folder;
+            this.showNotification('Drive folder saved', 'success');
+        }
+    }
+
+    async backupToDrive() {
+        try {
+            this.showLoading();
+            const result = await window._ipcRenderer.invoke('drive-backup');
+            if (result && result.ok) {
+                this.showNotification('Backup copied to Drive folder', 'success');
+            } else {
+                this.showNotification('Choose a Google Drive folder in Settings first', 'warning');
+            }
+        } catch (error) {
+            this.showNotification('Drive backup failed: ' + error.message, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async restoreFromDrive() {
+        if (window.auth && !window.auth.isAdmin()) {
+            this.showNotification('Admin permission required', 'error');
+            return;
+        }
+        const files = await window._ipcRenderer.invoke('drive-list');
+        if (!files || !files.length) {
+            this.showNotification('No ICAM backups found in the Drive folder', 'error');
+            return;
+        }
+        const options = files.map((f, i) => `<option value="${i}">${f.name}</option>`).join('');
+        app.showModal(`
+            <div class="modal">
+                <div class="modal-content modal-sm">
+                    <div class="modal-header">
+                        <h3>Restore from Drive</h3>
+                        <button class="modal-close" type="button">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p>This replaces the current database.</p>
+                        <select id="drive-restore-file" class="form-input">${options}</select>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" type="button" onclick="app.closeModal()">Cancel</button>
+                        <button class="btn btn-warning" type="button" id="drive-restore-ok">Restore</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        const ok = document.getElementById('drive-restore-ok');
+        if (ok) {
+            ok.addEventListener('click', async () => {
+                const select = document.getElementById('drive-restore-file');
+                const chosen = files[Number(select && select.value)];
+                const filePath = chosen ? chosen.path : '';
+                app.closeModal();
+                if (!filePath) return;
+                try {
+                    const result = await window._ipcRenderer.invoke('drive-restore', filePath);
+                    if (result && result.ok) {
+                        this.showNotification('Database restored. Reloading…', 'success');
+                        setTimeout(() => window.location.reload(), 600);
+                    }
+                } catch (error) {
+                    this.showNotification('Restore failed: ' + error.message, 'error');
+                }
+            });
+        }
+    }
+
+    async saveWhatsAppTemplate() {
+        if (window.auth) window.auth.requireAdmin();
+        const form = document.getElementById('shop-settings-form');
+        const waInput = document.getElementById('whatsapp-template-input');
+        const result = await window._ipcRenderer.invoke('shop-settings-save', {
+            shop_name: form ? form.shop_name.value : 'Installment Management',
+            phone: form ? form.phone.value : '',
+            address: form ? form.address.value : '',
+            idle_minutes: form ? form.idle_minutes.value : 30,
+            whatsapp_template: waInput ? waInput.value : ''
+        });
+        if (result && result.ok) this.showNotification('WhatsApp template saved', 'success');
+        else this.showNotification('Could not save template', 'error');
+    }
+
+    confirmBackupQuit() {
+        if (this._quitPromptOpen) return;
+        this._quitPromptOpen = true;
+        app.showModal(`
+            <div class="modal">
+                <div class="modal-content modal-sm">
+                    <div class="modal-header">
+                        <h3>Take a backup before exit?</h3>
+                        <button class="modal-close" type="button">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p>A backup protects shop data if this PC fails.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" type="button" id="quit-no-backup">Exit without backup</button>
+                        <button class="btn btn-secondary" type="button" id="quit-backup-file">Backup to file</button>
+                        <button class="btn btn-primary" type="button" id="quit-backup-drive">Backup to Drive</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        const finishQuit = async (action) => {
+            this._quitPromptOpen = false;
+            app.closeModal();
+            try {
+                if (action === 'file') await this.backupToFile();
+                if (action === 'drive') await this.backupToDrive();
+            } catch (_) { /* still quit */ }
+            await window._ipcRenderer.invoke('app-quit-now');
+        };
+        const noBtn = document.getElementById('quit-no-backup');
+        const fileBtn = document.getElementById('quit-backup-file');
+        const driveBtn = document.getElementById('quit-backup-drive');
+        if (noBtn) noBtn.addEventListener('click', () => finishQuit('none'));
+        if (fileBtn) fileBtn.addEventListener('click', () => finishQuit('file'));
+        if (driveBtn) driveBtn.addEventListener('click', () => finishQuit('drive'));
+        const resetPrompt = () => { this._quitPromptOpen = false; };
+        const closeBtn = document.querySelector('#modal-container .modal-close');
+        if (closeBtn) closeBtn.addEventListener('click', resetPrompt);
+        const overlay = document.querySelector('#modal-container .modal');
+        if (overlay) overlay.addEventListener('click', (e) => { if (e.target === overlay) resetPrompt(); });
     }
 
     async saveShopSettings(formData) {

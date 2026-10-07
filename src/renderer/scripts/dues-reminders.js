@@ -394,26 +394,45 @@ class DuesRemindersManager {
         }
     }
 
-    viewInstallmentDetails(customerId) {
-        // Switch to installments section and search for the customer
-        app.showSection('installments');
-        // This would trigger the search functionality in installments module
-        app.showNotification('Switched to installments view', 'info');
+    async viewInstallmentDetails(customerId) {
+        try {
+            if (typeof app.navigateToSection === 'function') {
+                app.navigateToSection('installments', { force: true });
+            }
+            const customer = await Database.get('SELECT * FROM customers WHERE id = ?', [Number(customerId)]);
+            if (!customer) {
+                app.showNotification('Customer not found', 'error');
+                return;
+            }
+            if (app.installments && typeof app.installments.showCustomerDetails === 'function') {
+                await app.installments.showCustomerDetails(customer);
+            }
+        } catch (error) {
+            console.error('Error opening installment details:', error);
+            app.showNotification(`Failed to open customer schedule: ${error.message}`, 'error');
+        }
     }
 
     collectCashDues(cashSaleId) {
-        // This would open the cash sales collection modal
         if (app.cashSales) {
             app.cashSales.collectDues(cashSaleId);
         }
     }
 
-    viewDetails(type, id) {
+    async viewDetails(type, id) {
         if (type === 'installment') {
-            this.viewInstallmentDetails(id);
-        } else if (type === 'cash_sale') {
-            app.showSection('cash-sales');
-            app.showNotification('Switched to cash sales view', 'info');
+            const row = this.overdueItems.find((item) => item.type === 'installment' && Number(item.id) === Number(id));
+            const customerId = row && row.customer_id ? row.customer_id : id;
+            await this.viewInstallmentDetails(customerId);
+            return;
+        }
+        if (type === 'cash_sale') {
+            if (typeof app.navigateToSection === 'function') {
+                app.navigateToSection('cash-sales', { force: true });
+            }
+            if (app.cashSales && typeof app.cashSales.collectDues === 'function') {
+                app.cashSales.collectDues(id);
+            }
         }
     }
 
