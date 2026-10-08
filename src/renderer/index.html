@@ -88,7 +88,12 @@
 
         <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
         <!-- Sidebar Navigation -->
-        <nav class="sidebar">
+        <nav class="sidebar" id="app-sidebar">
+            <div class="sidebar-toolbar">
+                <button id="sidebar-collapse-btn" class="btn btn-secondary sidebar-collapse-btn" type="button" title="Minimize sidebar" aria-label="Minimize sidebar" aria-expanded="true">
+                    <i class="fas fa-angles-left"></i>
+                </button>
+            </div>
             <ul class="nav-menu">
                 <li class="nav-item active">
                     <a href="#dashboard" class="nav-link" data-section="dashboard">
@@ -443,7 +448,7 @@
                         </button>
                     </div>
                 </div>
-                <p class="text-muted">Advances reduce remaining salary for the month. Both advances and salary count as expenses in the cash book, and appear separately in the Universal report.</p>
+                <p class="text-muted">Salary cycle starts on the join-date anniversary each month. Remaining subtracts advances and salary already paid this cycle. After a full salary payment, Advance applies to the next cycle.</p>
                 <div class="table-container">
                     <table class="data-table" id="staff-table">
                         <thead>

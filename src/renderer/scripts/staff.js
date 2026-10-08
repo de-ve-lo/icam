@@ -9,9 +9,25 @@ class StaffManager {
         if (addBtn) addBtn.addEventListener('click', () => this.showAddModal());
     }
 
-    currentMonth() {
+    todayStr() {
+        if (Utils.getCurrentDate) return Utils.getCurrentDate('YYYY-MM-DD');
+        if (Utils.toLocalDateString) return Utils.toLocalDateString(new Date());
         const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    cycleFor(staff, today) {
+        return StaffSalary.cycleBounds(staff && staff.join_date, today || this.todayStr());
+    }
+
+    async cycleSummary(staff) {
+        const today = this.todayStr();
+        const cycle = this.cycleFor(staff, today);
+        const currentKey = StaffSalary.cycleKey(cycle.start);
+        const entries = await Database.getStaffEntries(staff.id, currentKey);
+        const summary = StaffSalary.summarizeEntries(entries);
+        const remaining = StaffSalary.remainingForCycle(staff.monthly_salary, summary.advances, summary.salaryPaid);
+        return { cycle, currentKey, nextKey: StaffSalary.nextCycleKey(cycle.start), entries, summary, remaining, today };
     }
 
     async loadData() {
@@ -30,21 +46,17 @@ class StaffManager {
     async renderTable() {
         const tbody = document.querySelector('#staff-table tbody');
         if (!tbody) return;
-        const month = this.currentMonth();
         const rows = [];
         for (const s of this.staff) {
-            const entries = await Database.getStaffEntries(s.id, month);
-            const advances = (entries || []).filter((e) => e.type === 'advance').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-            const remaining = StaffSalary.remainingForMonth(s.monthly_salary, advances);
-            const collected = StaffSalary.collectedInMonth(entries);
+            const info = await this.cycleSummary(s);
             rows.push(`
                 <tr>
                     <td>${s.name}</td>
                     <td>${s.phone || '-'}</td>
                     <td>${Utils.formatCurrency(s.monthly_salary)}</td>
-                    <td>${Utils.formatCurrency(advances)}</td>
-                    <td>${Utils.formatCurrency(remaining)}</td>
-                    <td>${Utils.formatCurrency(collected)}</td>
+                    <td>${Utils.formatCurrency(info.summary.advances)}</td>
+                    <td>${Utils.formatCurrency(info.remaining)}</td>
+                    <td>${Utils.formatCurrency(info.summary.collected)}</td>
                     <td>${s.status || 'active'}</td>
                     <td>
                         <div class="action-buttons">
@@ -153,12 +165,11 @@ class StaffManager {
     async payEntry(id, type) {
         const staff = this.staff.find((s) => Number(s.id) === Number(id));
         if (!staff) return;
-        const month = this.currentMonth();
-        const entries = await Database.getStaffEntries(staff.id, month);
-        const advances = (entries || []).filter((e) => e.type === 'advance').reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-        const remaining = StaffSalary.remainingForMonth(staff.monthly_salary, advances);
-        const today = Utils.getCurrentDate ? Utils.getCurrentDate('YYYY-MM-DD') : new Date().toISOString().slice(0, 10);
+        const info = await this.cycleSummary(staff);
+        const remaining = info.remaining;
+        const today = info.today;
         const defaultAmount = type === 'salary' ? remaining : '';
+        const advanceGoesNext = type === 'advance' && remaining <= 0;
         app.showModal(`
             <div class="modal">
                 <div class="modal-content modal-sm">
@@ -167,7 +178,8 @@ class StaffManager {
                         <button class="modal-close" type="button">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <p>Monthly: ${Utils.formatCurrency(staff.monthly_salary)} | Advances this month: ${Utils.formatCurrency(advances)} | Remaining: ${Utils.formatCurrency(remaining)}</p>
+                        <p>Cycle ${info.cycle.start} to ${info.cycle.end} | Monthly: ${Utils.formatCurrency(staff.monthly_salary)} | Advances: ${Utils.formatCurrency(info.summary.advances)} | Paid: ${Utils.formatCurrency(info.summary.salaryPaid)} | Remaining: ${Utils.formatCurrency(remaining)}</p>
+                        ${advanceGoesNext ? '<p class="form-hint">This cycle is fully paid. This advance will apply to the next cycle.</p>' : ''}
                         <form id="staff-pay-form" class="form-grid">
                             <div class="form-group">
                                 <label class="form-label required">Date</label>
@@ -201,15 +213,23 @@ class StaffManager {
                     app.showNotification('Enter a valid amount', 'error');
                     return;
                 }
-                if (type === 'advance' && amount > remaining) {
-                    app.showNotification('Advance is more than remaining salary for this month', 'warning');
+                if (type === 'advance' && amount > remaining && remaining > 0) {
+                    app.showNotification('Advance is more than remaining salary for this cycle', 'warning');
                 }
                 if (type === 'salary' && amount > remaining) {
-                    app.showNotification('Salary amount cannot exceed remaining for this month', 'error');
+                    app.showNotification('Salary amount cannot exceed remaining for this cycle', 'error');
                     return;
                 }
                 const entryDate = fd.get('entry_date');
-                const monthKey = String(entryDate).slice(0, 7);
+                const monthKey = type === 'advance'
+                    ? StaffSalary.advanceMonthKey({
+                        monthlySalary: staff.monthly_salary,
+                        advances: info.summary.advances,
+                        salaryPaid: info.summary.salaryPaid,
+                        currentKey: info.currentKey,
+                        nextKey: info.nextKey
+                    })
+                    : info.currentKey;
                 try {
                     await Database.addStaffSalaryEntry({
                         staff_id: staff.id,

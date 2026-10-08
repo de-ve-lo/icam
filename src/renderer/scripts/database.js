@@ -728,12 +728,19 @@ class Database {
 
             const monthPrefix = today ? today.slice(0, 7) : null;
             const monthlyCollectionResult = await this.get(`
-                SELECT COALESCE(SUM(amount), 0) as total
-                FROM payments
-                WHERE (type = 'payment' OR type IS NULL)
-                  AND (is_deleted = 0 OR is_deleted IS NULL)
-                  AND strftime('%Y-%m', payment_date) = ?
-            `, [monthPrefix || '']);
+                SELECT COALESCE(SUM(amount), 0) as total FROM (
+                    SELECT amount
+                    FROM payments
+                    WHERE (type = 'payment' OR type IS NULL)
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                      AND strftime('%Y-%m', payment_date) = ?
+                    UNION ALL
+                    SELECT received_price as amount
+                    FROM cash_sales
+                    WHERE received_price > 0
+                      AND strftime('%Y-%m', sale_date) = ?
+                ) collection_rows
+            `, [monthPrefix || '', monthPrefix || '']);
             stats.monthlyCollection = monthlyCollectionResult?.total || 0;
 
             // Active installment customers
@@ -771,15 +778,27 @@ class Database {
     // Monthly collection data for charts
     static async getMonthlyCollectionData(months = 6) {
         try {
+            const monthsBack = Number(months) || 6;
             const data = await this.query(`
-                SELECT
-                    strftime('%Y-%m', payment_date) as month,
-                    SUM(amount) as total
-                FROM payments
-                WHERE (type = 'payment' OR type IS NULL)
-                AND (is_deleted = 0 OR is_deleted IS NULL)
-                AND payment_date >= date('now', '-${Number(months) || 6} months')
-                GROUP BY strftime('%Y-%m', payment_date)
+                SELECT month, SUM(total) as total FROM (
+                    SELECT
+                        strftime('%Y-%m', payment_date) as month,
+                        SUM(amount) as total
+                    FROM payments
+                    WHERE (type = 'payment' OR type IS NULL)
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                      AND payment_date >= date('now', '-${monthsBack} months')
+                    GROUP BY strftime('%Y-%m', payment_date)
+                    UNION ALL
+                    SELECT
+                        strftime('%Y-%m', sale_date) as month,
+                        SUM(received_price) as total
+                    FROM cash_sales
+                    WHERE received_price > 0
+                      AND sale_date >= date('now', '-${monthsBack} months')
+                    GROUP BY strftime('%Y-%m', sale_date)
+                ) monthly_rows
+                GROUP BY month
                 ORDER BY month ASC
             `);
 
@@ -832,22 +851,46 @@ class Database {
     // Payment history for a date range
     static async getPaymentHistory(startDate, endDate) {
         return await this.query(`
-            SELECT 
-                p.*,
-                c.account_no,
-                c.cnic_no,
-                pr.item_name,
-                i.installment_no
-            FROM payments p
-            JOIN installments i ON p.installment_id = i.id
-            JOIN customer_purchases cp ON i.purchase_id = cp.id
-            JOIN customers c ON cp.customer_id = c.id
-            JOIN stock s ON cp.stock_id = s.id
-            JOIN products pr ON s.product_id = pr.id
-            WHERE p.payment_date BETWEEN ? AND ?
-              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
-            ORDER BY p.payment_date DESC
-        `, [startDate, endDate]);
+            SELECT * FROM (
+                SELECT
+                    p.id,
+                    p.amount,
+                    p.payment_date,
+                    p.receipt_no,
+                    c.account_no,
+                    c.cnic_no,
+                    pr.item_name,
+                    i.installment_no,
+                    'installment' as source
+                FROM payments p
+                JOIN installments i ON p.installment_id = i.id
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                JOIN customers c ON cp.customer_id = c.id
+                JOIN stock s ON cp.stock_id = s.id
+                JOIN products pr ON s.product_id = pr.id
+                WHERE p.payment_date BETWEEN ? AND ?
+                  AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+                  AND (p.type = 'payment' OR p.type IS NULL)
+                UNION ALL
+                SELECT
+                    cs.id,
+                    cs.received_price as amount,
+                    cs.sale_date as payment_date,
+                    NULL as receipt_no,
+                    c.account_no,
+                    c.cnic_no,
+                    pr.item_name,
+                    NULL as installment_no,
+                    'cash' as source
+                FROM cash_sales cs
+                LEFT JOIN customers c ON cs.customer_id = c.id
+                JOIN stock s ON cs.stock_id = s.id
+                JOIN products pr ON s.product_id = pr.id
+                WHERE cs.sale_date BETWEEN ? AND ?
+                  AND cs.received_price > 0
+            ) history_rows
+            ORDER BY payment_date DESC
+        `, [startDate, endDate, startDate, endDate]);
     }
 
     static async getLatestPaymentForInstallment(installmentId) {

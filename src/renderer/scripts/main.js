@@ -100,6 +100,35 @@ class App {
         const hamburger = document.getElementById('hamburger-btn');
         const sidebar = document.querySelector('.sidebar');
         const backdrop = document.getElementById('sidebar-backdrop');
+        const collapseBtn = document.getElementById('sidebar-collapse-btn');
+        const applyCollapsed = (collapsed) => {
+            const appEl = document.getElementById('app');
+            if (appEl) appEl.classList.toggle('sidebar-collapsed', collapsed);
+            if (sidebar) sidebar.classList.toggle('collapsed', collapsed);
+            if (collapseBtn) {
+                collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                collapseBtn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Minimize sidebar');
+                collapseBtn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Minimize sidebar');
+                const icon = collapseBtn.querySelector('i');
+                if (icon) icon.className = collapsed ? 'fas fa-angles-right' : 'fas fa-angles-left';
+            }
+            try {
+                localStorage.setItem('icam-sidebar-collapsed', collapsed ? '1' : '0');
+            } catch (e) { /* ignore */ }
+        };
+        try {
+            applyCollapsed(localStorage.getItem('icam-sidebar-collapsed') === '1');
+        } catch (e) {
+            applyCollapsed(false);
+        }
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const appEl = document.getElementById('app');
+                applyCollapsed(!(appEl && appEl.classList.contains('sidebar-collapsed')));
+            });
+        }
         const closeSidebar = () => {
             if (sidebar) sidebar.classList.remove('open');
             if (backdrop) backdrop.classList.add('hidden');

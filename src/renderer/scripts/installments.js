@@ -506,33 +506,44 @@ class InstallmentManager {
         container.innerHTML = sections.join('');
     }
 
-    openPaymentModal(installmentId) {
-        const inst = this.installments.find(i => Number(i.installment_id) === Number(installmentId));
-        if (!inst) return;
+     openPayRemainingModal(installmentId) {
+         this.openPaymentModal(installmentId, { remaining: true });
+     }
 
-        const modalHtml = `
-            <div class="modal">
-                <div class="modal-content modal-sm">
-                    <div class="modal-header">
-                        <h3><i class="fas fa-money-bill"></i> Record Payment</h3>
-                        <button class="modal-close">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="detail-grid">
-                            <div class="detail-item"><label>Installment #</label><span>${inst.installment_no}</span></div>
-                            <div class="detail-item"><label>Due Date</label><span>${Utils.formatDate(inst.due_date)}</span></div>
-                            <div class="detail-item"><label>Amount</label><span>${Utils.formatCurrency(inst.amount)}</span></div>
-                            <div class="detail-item"><label>Paid</label><span>${Utils.formatCurrency(inst.paid_amount || 0)}</span></div>
-                        </div>
-                        <form id="payment-form" class="form-grid">
-                            <div class="form-group">
-                                <label class="form-label required">Payment Amount</label>
-                                <div class="input-group">
-                                    <span class="input-prefix">Rs.</span>
-                                    <input type="number" name="amount" class="form-input" required min="1" step="0.01">
-                                </div>
-                                <small class="form-hint">If you pay more than the due amount, excess will be applied to future installments</small>
-                            </div>
+     openEditPaymentModal(installmentId) {
+         this.editPayment(installmentId);
+     }
+
+     openPaymentModal(installmentId, options = {}) {
+         const inst = this.installments.find(i => Number(i.installment_id) === Number(installmentId));
+         if (!inst) return;
+         const remaining = Math.max(0, (Number(inst.amount) || 0) - (Number(inst.paid_amount) || 0));
+         const defaultAmount = options.remaining && remaining > 0 ? remaining : '';
+
+         const modalHtml = `
+             <div class="modal">
+                 <div class="modal-content modal-sm">
+                     <div class="modal-header">
+                         <h3><i class="fas fa-money-bill"></i> ${options.remaining ? 'Pay Remaining' : 'Record Payment'}</h3>
+                         <button class="modal-close">&times;</button>
+                     </div>
+                     <div class="modal-body">
+                         <div class="detail-grid">
+                             <div class="detail-item"><label>Installment #</label><span>${inst.installment_no}</span></div>
+                             <div class="detail-item"><label>Due Date</label><span>${Utils.formatDate(inst.due_date)}</span></div>
+                             <div class="detail-item"><label>Amount</label><span>${Utils.formatCurrency(inst.amount)}</span></div>
+                             <div class="detail-item"><label>Paid</label><span>${Utils.formatCurrency(inst.paid_amount || 0)}</span></div>
+                             <div class="detail-item"><label>Remaining</label><span>${Utils.formatCurrency(remaining)}</span></div>
+                         </div>
+                         <form id="payment-form" class="form-grid">
+                             <div class="form-group">
+                                 <label class="form-label required">Payment Amount</label>
+                                 <div class="input-group">
+                                     <span class="input-prefix">Rs.</span>
+                                     <input type="number" name="amount" class="form-input" required min="1" step="0.01" value="${defaultAmount}">
+                                 </div>
+                                 <small class="form-hint">Leftover stays on this installment until the due month passes, then rolls to the next</small>
+                             </div>
                             <div class="form-group">
                                 <label class="form-label">Payment Date</label>
                                 <input type="date" name="payment_date" class="form-input" value="${Utils.toLocalDateString(new Date())}">
@@ -741,7 +752,8 @@ class InstallmentManager {
 
             // Check for distributed payments with the same receipt number
             const distributedPayments = await Database.query(
-                `SELECT p.*, i.installment_no, i.amount as installment_amount, i.paid_amount as installment_paid
+                `SELECT p.*, i.installment_no, i.amount as installment_amount, i.paid_amount as installment_paid,
+                        COALESCE(i.original_amount, i.amount) as original_amount, i.remaining_balance, i.status as installment_status
                  FROM payments p 
                  JOIN installments i ON p.installment_id = i.id
                  WHERE p.receipt_no = ? AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
@@ -765,6 +777,8 @@ class InstallmentManager {
             });
 
             const totalTransaction = totalCashPaid + totalDiscount;
+            const scheduleRows = (this.installments || []).filter((row) => Number(row.purchase_id) === Number(inst.purchase_id));
+            const scheduleRemaining = InstallmentEngine.totals(scheduleRows.length ? scheduleRows : [inst]).grandRemaining;
 
             const win = window.open('', '_blank');
             const shopHeader = await Utils.shopPrintHeaderHtml();
@@ -808,6 +822,7 @@ class InstallmentManager {
                                     <th>Installment #</th>
                                     <th>Amount Due</th>
                                     <th>Credited</th>
+                                    <th>Remaining</th>
                                     <th>Type</th>
                                     <th>Notes</th>
                                 </tr>
@@ -815,11 +830,13 @@ class InstallmentManager {
                             <tbody>
                                 ${distributedPayments.map(p => {
                 const isDiscount = p.notes && (p.notes.includes('discount') || p.notes.includes('Discount'));
+                const rowRemaining = Math.max(0, (Number(p.original_amount) || Number(p.installment_amount) || 0) - (Number(p.installment_paid) || 0));
                 return `
                                     <tr class="${isDiscount ? 'discount-row' : ''}">
                                         <td>${p.installment_no}</td>
                                         <td>${Utils.formatCurrency(p.installment_amount)}</td>
                                         <td>${Utils.formatCurrency(p.amount)}</td>
+                                        <td>${Utils.formatCurrency(rowRemaining)}</td>
                                         <td>${isDiscount ? '<strong>DISCOUNT</strong>' : 'Payment'}</td>
                                         <td>${p.notes || ''}</td>
                                     </tr>
@@ -833,9 +850,11 @@ class InstallmentManager {
                             <tr><th>Installment #</th><td>${inst.installment_no}</td></tr>
                             <tr><th>Due Date</th><td>${Utils.formatDate(inst.due_date, 'readable')}</td></tr>
                             <tr><th>Amount Paid</th><td>${Utils.formatCurrency(payment.amount)}</td></tr>
-                            <tr><th>Status</th><td>${Utils.capitalizeWords(inst.status)}</td></tr>
+                            <tr><th>Remaining on this installment</th><td>${Utils.formatCurrency(Math.max(0, (Number(inst.original_amount) || Number(inst.amount) || 0) - (Number(inst.paid_amount) || 0)))}</td></tr>
+                            <tr><th>Status</th><td>${Utils.capitalizeWords(inst.status || inst.computedStatus)}</td></tr>
                         </table>
                     `}
+                    <p><strong>Schedule Remaining:</strong> ${Utils.formatCurrency(scheduleRemaining)}</p>
                     ${Utils.developerCreditHtml()}
                 </body>
                 </html>

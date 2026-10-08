@@ -272,9 +272,9 @@ class DashboardManager {
                                     <i class="fas fa-money-bill text-success"></i>
                                 </div>
                                 <div class="activity-content">
-                                    <div class="activity-title">
-                                        ${payment.account_no} - Installment #${payment.installment_no}
-                                    </div>
+                                     <div class="activity-title">
+                                         ${payment.account_no || 'Walk-in'} - ${payment.source === 'cash' || payment.installment_no == null ? 'Cash sale' : 'Installment #' + payment.installment_no}
+                                     </div>
                                     <div class="activity-meta">
                                         ${Utils.formatCurrency(payment.amount)} • ${Utils.formatDate(payment.payment_date, 'readable')}
                                     </div>
