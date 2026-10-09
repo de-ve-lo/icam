@@ -331,9 +331,10 @@ class ReportsManager {
     async generateOutstandingAmountsReport() {
         try {
             this.safeShowLoading();
-            
-            const outstandingData = await this.getOutstandingData();
+            const asOf = this.getLocalRange().end;
+            const outstandingData = await this.getOutstandingData(asOf);
             outstandingData.shopName = await this.getShopName();
+            outstandingData.asOf = asOf;
             this.showOutstandingReport(outstandingData);
             
         } catch (error) {
@@ -412,6 +413,8 @@ class ReportsManager {
                 return await this.generateMonthlyReport();
             case 'outstanding':
                 return await this.generateOutstandingReport();
+            case 'receivable':
+                return await this.generateReceivableReceived();
             case 'cashsales':
                 return await this.generateCashSalesReport();
             case 'supplier':
@@ -492,6 +495,90 @@ class ReportsManager {
         return await this.generateOutstandingAmountsReport();
     }
 
+    async generateReceivableReceived() {
+        try {
+            this.safeShowLoading();
+            const asOf = this.getLocalRange().end;
+            const shopName = await this.getShopName();
+            const raw = await this.safeQuery(`
+                SELECT
+                    i.id, i.installment_no, i.due_date,
+                    COALESCE(i.original_amount, i.amount) as original_amount,
+                    COALESCE(i.paid_amount, 0) as paid_amount,
+                    c.customer_name, c.account_no, c.phone,
+                    COALESCE(p.item_name, '') as item_name
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                JOIN customers c ON cp.customer_id = c.id
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                  AND cp.status != 'deleted'
+                ORDER BY i.due_date, c.account_no, i.installment_no
+            `, [], []);
+            if (!raw.length) {
+                this.renderReport(this.emptyReport('Installment Receivable and Received'));
+                return;
+            }
+            const paper = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.buildReceivableRows)
+                ? InstallmentEngine.buildReceivableRows(raw, asOf)
+                : { rows: [], footer: { short: 0, received: 0, final_bal: 0 } };
+            const inner = `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>S.#</th>
+                            <th>Due Date</th>
+                            <th>Acc.#</th>
+                            <th>Name</th>
+                            <th>Phone</th>
+                            <th>Model</th>
+                            <th>Ins.#</th>
+                            <th>Ins.Rs.</th>
+                            <th>Short</th>
+                            <th>Recvd</th>
+                            <th>FinalBal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${paper.rows.map((r) => `
+                            <tr>
+                                <td>${r.serial}</td>
+                                <td>${this.safeFormatDate(r.due_date)}</td>
+                                <td>${r.account_no}</td>
+                                <td>${r.name}</td>
+                                <td>${r.phone}</td>
+                                <td>${r.model}</td>
+                                <td>${r.installment_no}</td>
+                                <td>${this.safeFormatCurrency(r.ins_rs)}</td>
+                                <td>${this.safeFormatCurrency(r.short)}</td>
+                                <td>${this.safeFormatCurrency(r.received)}</td>
+                                <td>${this.safeFormatCurrency(r.final_bal)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="8"><strong>Totals</strong></td>
+                            <td><strong>${this.safeFormatCurrency(paper.footer.short)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(paper.footer.received)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(paper.footer.final_bal)}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Installment Receivable and Received', `As of ${asOf}`, inner, shopName));
+        } catch (error) {
+            console.error('Error generating receivable report:', error);
+            this.safeShowNotification('Failed to generate receivable report', 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
     async generateCashSalesReport() {
         return await this.generateCashSalesReportData();
     }
@@ -508,9 +595,9 @@ class ReportsManager {
         return await this.generateStockReportData();
     }
 
-    async getOutstandingData() {
+    async getOutstandingData(asOf) {
         try {
-            // Get installment dues with customer details and delivery date
+            const asOfDate = asOf || this.getLocalRange().end;
             const installmentDues = await this.safeQuery(`
                 SELECT 
                     COALESCE(c.customer_name, 'N/A') as customer_name,
@@ -519,7 +606,10 @@ class ReportsManager {
                     cp.start_date,
                     SUM(COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) as total_short_amount,
                     COUNT(CASE WHEN i.status != 'paid' AND i.status != 'settled' THEN 1 END) as pending_installments,
-                    COUNT(CASE WHEN i.due_date < date('now') AND i.status != 'paid' AND i.status != 'settled' THEN 1 END) as overdue_installments,
+                    COUNT(CASE WHEN strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?) AND i.status != 'paid' AND i.status != 'settled' THEN 1 END) as overdue_installments,
+                    SUM(CASE WHEN strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
+                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
+                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as total_short,
                     (SELECT MAX(p.payment_date) FROM payments p WHERE p.customer_id = c.id AND (p.type IS NULL OR p.type = 'payment') AND (p.is_deleted = 0 OR p.is_deleted IS NULL)) as last_payment_date
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
@@ -530,7 +620,7 @@ class ReportsManager {
                 GROUP BY c.id, c.customer_name, c.account_no, c.phone, cp.id, cp.start_date
                 HAVING total_short_amount > 0
                 ORDER BY total_short_amount DESC
-            `, [], []);
+            `, [asOfDate, asOfDate], []);
 
             // Get cash sale dues with customer details
             const cashSaleDues = await this.safeQuery(`
@@ -793,9 +883,10 @@ class ReportsManager {
                                 <th>Account</th>
                                 <th>Phone</th>
                                 <th>Start Date</th>
-                                <th>Remaining</th>
-                                <th>Overdue</th>
-                                <th>Last Payment</th>
+                                 <th>Remaining</th>
+                                 <th>Total Short</th>
+                                 <th>Overdue</th>
+                                 <th>Last Payment</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -806,6 +897,7 @@ class ReportsManager {
                                     <td>${due.phone || 'N/A'}</td>
                                     <td>${this.safeFormatDate(due.start_date)}</td>
                                     <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.total_short || 0)}</td>
                                     <td>${due.overdue_installments || 0}</td>
                                     <td>${due.last_payment_date ? this.safeFormatDate(due.last_payment_date) : 'N/A'}</td>
                                 </tr>
@@ -847,7 +939,9 @@ class ReportsManager {
                 ` : '<p class="text-muted">No outstanding cash sale dues</p>'}
             </div>
         `;
-        this.renderReport(this.wrapPanel('Outstanding Amounts Report', 'All dates', inner, data.shopName));
+        const totalShortSum = installmentDues.reduce((s, d) => s + (Number(d.total_short) || 0), 0);
+        const asOfLabel = data.asOf ? `As of ${data.asOf}` : 'All dates';
+        this.renderReport(this.wrapPanel('Outstanding Amounts Report', asOfLabel, `<p><strong>Total Short (as of ${data.asOf || 'today'}):</strong> ${this.safeFormatCurrency(totalShortSum)}</p>${inner}`, data.shopName));
     }
 
     showCashSalesReport(data) {
@@ -1204,7 +1298,7 @@ class ReportsManager {
                 WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
-                  AND DATE(i.due_date) < DATE(?)
+                  AND strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 GROUP BY c.id, c.customer_name, c.account_no, c.phone
                 ORDER BY (bucket_1_30 + bucket_31_60 + bucket_61_90 + bucket_90_plus) DESC
@@ -1290,6 +1384,18 @@ class ReportsManager {
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
             `, [customerId], [{ remaining: 0 }]);
             const remaining = (remainingRows[0] && remainingRows[0].remaining) || 0;
+            const asOf = this.getLocalRange().end;
+            const installmentRows = await this.safeQuery(`
+                SELECT i.due_date, COALESCE(i.original_amount, i.amount) as original_amount, COALESCE(i.paid_amount, 0) as paid_amount
+                FROM installments i
+                JOIN customer_purchases cp ON i.purchase_id = cp.id
+                WHERE cp.customer_id = ?
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+            `, [customerId], []);
+            const totalShort = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.totalShort)
+                ? InstallmentEngine.totalShort(installmentRows, asOf)
+                : 0;
             let photoHtml = '';
             if (customer.photo_path && window._ipcRenderer) {
                 try {
@@ -1304,7 +1410,8 @@ class ReportsManager {
                 <p><strong>Customer:</strong> ${customer.customer_name || ''} &nbsp;
                    <strong>Account:</strong> ${customer.account_no || 'N/A'} &nbsp;
                    <strong>Phone:</strong> ${customer.phone || 'N/A'}</p>
-                <p><strong>Remaining:</strong> ${this.safeFormatCurrency(remaining)}</p>
+                <p><strong>Remaining:</strong> ${this.safeFormatCurrency(remaining)} &nbsp;
+                   <strong>Total Short (as of ${asOf}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
                 <div class="section">
                     <h4>Purchases</h4>
                     ${purchases.length ? `
@@ -1572,7 +1679,18 @@ class ReportsManager {
                 </table>
                 </div>
             `;
+            const asOf = this.getLocalRange().end;
+            const shortRows = await this.safeQuery(`
+                SELECT due_date, COALESCE(original_amount, amount) as original_amount, COALESCE(paid_amount, 0) as paid_amount
+                FROM installments
+                WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                  AND (COALESCE(original_amount, amount) - COALESCE(paid_amount, 0)) > 0
+            `, [], []);
+            const totalShort = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.totalShort)
+                ? InstallmentEngine.totalShort(shortRows, asOf)
+                : 0;
             const inner = `
+                <p><strong>Total Short (as of ${asOf}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
                 <h4>Next 7 days (${end7})</h4>
                 ${in7.length ? table(in7) : '<p class="text-muted">No dues in the next 7 days.</p>'}
                 <h4>Next 30 days</h4>
@@ -1609,7 +1727,7 @@ class ReportsManager {
                 LEFT JOIN products p ON s.product_id = p.id
                 WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
-                  AND DATE(i.due_date) < DATE(?)
+                  AND strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 ORDER BY days_overdue DESC, c.customer_name
             `, [today, today], []);
@@ -1617,7 +1735,9 @@ class ReportsManager {
                 this.renderReport(this.emptyReport('Defaulter List'));
                 return;
             }
+            const totalShort = rows.reduce((sum, r) => sum + (Number(r.remaining) || 0), 0);
             const inner = `
+                <p><strong>Total Short (as of ${today}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
                 <div class="table-container">
                 <table class="data-table">
                     <thead>

@@ -376,6 +376,17 @@ class DatabaseManager {
       if (!(await this.columnExists('customers', 'cnic_photo_path'))) {
         await this.run("ALTER TABLE customers ADD COLUMN cnic_photo_path TEXT DEFAULT ''");
       }
+      if (!(await this.columnExists('customers', 'cnic_front_photo_path'))) {
+        await this.run("ALTER TABLE customers ADD COLUMN cnic_front_photo_path TEXT DEFAULT ''");
+      }
+      if (!(await this.columnExists('customers', 'cnic_back_photo_path'))) {
+        await this.run("ALTER TABLE customers ADD COLUMN cnic_back_photo_path TEXT DEFAULT ''");
+      }
+      await this.run(`UPDATE customers
+        SET cnic_front_photo_path = cnic_photo_path
+        WHERE (cnic_front_photo_path IS NULL OR cnic_front_photo_path = '')
+          AND cnic_photo_path IS NOT NULL
+          AND cnic_photo_path != ''`);
 
       await this.run(`CREATE TABLE IF NOT EXISTS staff (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

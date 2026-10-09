@@ -172,7 +172,8 @@ class CustomerManager {
                                 <label class="form-label">Photos</label>
                                 <div class="header-actions">
                                     <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'photo')">Customer photo</button>
-                                    <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic')">CNIC photo</button>
+                                    <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic-front')">CNIC front</button>
+                                    <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic-back')">CNIC back</button>
                                 </div>
                             </div>
                             <div class="form-grid-full">
@@ -296,7 +297,8 @@ class CustomerManager {
                         <div class="customer-photos" id="customer-photos-${customer.id}"></div>
                         <div class="header-actions">
                             <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'photo')">Customer photo</button>
-                            <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic')">CNIC photo</button>
+                            <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic-front')">CNIC front</button>
+                            <button type="button" class="btn btn-secondary" onclick="app.customers.pickPhoto(${customer.id}, 'cnic-back')">CNIC back</button>
                             ${this.whatsAppLink(customer)}
                         </div>
                         <div style="margin-top:1rem;">
@@ -489,7 +491,13 @@ class CustomerManager {
         try {
             const result = await window._ipcRenderer.invoke('customer-photo-pick', { customerId, kind });
             if (result && result.ok) {
-                app.showNotification(kind === 'cnic' ? 'CNIC photo saved' : 'Customer photo saved', 'success');
+                const labels = {
+                    photo: 'Customer photo saved',
+                    cnic: 'CNIC front photo saved',
+                    'cnic-front': 'CNIC front photo saved',
+                    'cnic-back': 'CNIC back photo saved'
+                };
+                app.showNotification(labels[kind] || 'Photo saved', 'success');
                 await this.loadData();
                 const updated = this.customers.find((c) => Number(c.id) === Number(customerId));
                 if (updated) this.showPhotos(updated);
@@ -503,12 +511,18 @@ class CustomerManager {
         const host = document.getElementById('customer-photos-' + customer.id);
         if (!host) return;
         const parts = [];
-        for (const [kind, path] of [['photo', customer.photo_path], ['cnic', customer.cnic_photo_path]]) {
+        const frontPath = customer.cnic_front_photo_path || customer.cnic_photo_path;
+        for (const [kind, path] of [
+            ['photo', customer.photo_path],
+            ['cnic-front', frontPath],
+            ['cnic-back', customer.cnic_back_photo_path]
+        ]) {
             if (!path) continue;
             try {
                 const result = await window._ipcRenderer.invoke('customer-photo-url', path);
                 if (result && result.ok && result.data_url) {
-                    parts.push(`<div class="customer-photo-item"><p>${kind === 'cnic' ? 'CNIC' : 'Customer'}</p><img src="${result.data_url}" alt="${kind}"></div>`);
+                    const label = kind === 'cnic-front' ? 'CNIC front' : kind === 'cnic-back' ? 'CNIC back' : 'Customer';
+                    parts.push(`<div class="customer-photo-item"><p>${label}</p><img src="${result.data_url}" alt="${kind}"></div>`);
                 }
             } catch (_) { /* optional */ }
         }

@@ -173,35 +173,31 @@ class DuesRemindersManager {
                             <th>Customer</th>
                             <th>Account No</th>
                             <th>Phone</th>
-                            <th>Item</th>
-                            <th>Due Date</th>
-                            <th>Amount Due</th>
-                            <th>Days Overdue</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${this.installmentDues.map(due => `
-                            <tr class="stagger-item ${due.days_overdue > 0 ? 'row-overdue' : ''}">
-                                <td><strong>${due.customer_name || 'N/A'}</strong></td>
-                                <td>${due.account_no}</td>
-                                <td>${due.phone}</td>
-                                <td>${due.item_name}</td>
-                                <td>${Utils.formatDate(due.due_date)}</td>
-                                <td><strong>${Utils.formatCurrency(due.remaining_amount)}</strong></td>
-                                <td>${due.days_overdue > 0 ? `<span class="text-danger">${due.days_overdue} days</span>` : '<span class="text-success">On time</span>'}</td>
-                                <td>
-                                    <div class="action-buttons">
-                                        <button class="btn btn-sm btn-warning" onclick="app.duesReminders.sendSingleReminder('installment', ${due.customer_id})">
-                                            <i class="fas fa-bell"></i> Remind
-                                        </button>
-                                        <button class="btn btn-sm btn-primary" onclick="app.duesReminders.viewInstallmentDetails(${due.customer_id})">
-                                            <i class="fas fa-eye"></i> View
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        `).join('')}
+                             <th>Type</th>
+                             <th>Due Date</th>
+                             <th>Amount Due</th>
+                             <th>Actions</th>
+                         </tr>
+                     </thead>
+                     <tbody>
+                         ${this.installmentDues.map(due => `
+                             <tr class="stagger-item ${due.kind === 'short' ? 'row-overdue' : ''}">
+                                 <td><strong>${due.customer_name || 'N/A'}</strong></td>
+                                 <td>${due.account_no}</td>
+                                 <td>${due.phone}</td>
+                                 <td>${due.kind === 'short' ? 'Short' : 'Current'}</td>
+                                 <td>${Utils.formatDate(due.due_date)}</td>
+                                 <td><strong>${Utils.formatCurrency(due.remaining_amount || due.amount)}</strong></td>
+                                 <td>
+                                     <div class="action-buttons">
+                                         ${this.whatsAppLink(due)}
+                                         <button class="btn btn-sm btn-primary" onclick="app.duesReminders.viewInstallmentDetails(${due.customer_id})">
+                                             <i class="fas fa-eye"></i> View
+                                         </button>
+                                     </div>
+                                 </td>
+                             </tr>
+                         `).join('')}
                     </tbody>
                 </table>
             </div>
@@ -252,11 +248,13 @@ class DuesRemindersManager {
                                 <td><strong>${Utils.formatCurrency(due.due_amount)}</strong></td>
                                 <td>
                                     <div class="action-buttons">
-                                        ${due.customer_id ? `
-                                            <button class="btn btn-sm btn-warning" onclick="app.duesReminders.sendSingleReminder('cash_sale', ${due.customer_id})">
-                                                <i class="fas fa-bell"></i> Remind
-                                            </button>
-                                        ` : ''}
+                                         ${due.customer_id ? this.whatsAppLink({
+                                             phone: due.phone,
+                                             customer_name: due.customer_name,
+                                             account_no: due.account_no,
+                                             remaining_amount: due.due_amount,
+                                             due_date: due.sale_date
+                                         }) : ''}
                                         <button class="btn btn-sm btn-success" onclick="app.duesReminders.collectCashDues(${due.id})">
                                             <i class="fas fa-money-bill"></i> Collect
                                         </button>
@@ -317,9 +315,12 @@ class DuesRemindersManager {
                                 <td><span class="text-danger"><strong>${item.days_overdue} days</strong></span></td>
                                 <td>
                                     <div class="action-buttons">
-                                        <button class="btn btn-sm btn-danger" onclick="app.duesReminders.sendUrgentReminder('${item.type}', ${item.customer_id || item.id})">
-                                            <i class="fas fa-exclamation-triangle"></i> Urgent
-                                        </button>
+                                         ${this.whatsAppLink({
+                                             phone: item.phone,
+                                             customer_name: item.customer_name,
+                                             remaining_amount: item.amount,
+                                             due_date: item.due_date
+                                         })}
                                         <button class="btn btn-sm btn-primary" onclick="app.duesReminders.viewDetails('${item.type}', ${item.id})">
                                             <i class="fas fa-eye"></i> Details
                                         </button>
@@ -335,63 +336,68 @@ class DuesRemindersManager {
         container.innerHTML = table;
     }
 
+    reminderUrl(row) {
+        if (typeof Utils === 'undefined' || !Utils.whatsAppUrl || !row || !row.phone) return '';
+        const settings = (typeof app !== 'undefined' && app._shopSettingsCache) || {};
+        const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
+        const amount = row.remaining_amount != null ? row.remaining_amount : (row.amount != null ? row.amount : row.due_amount);
+        const text = Utils.fillWhatsAppTemplate(template, {
+            name: row.customer_name || '',
+            account: row.account_no || '',
+            amount: typeof Utils.formatCurrency === 'function' ? Utils.formatCurrency(amount) : String(amount || ''),
+            due_date: row.due_date || '',
+            shop: settings.shop_name || ''
+        });
+        return Utils.whatsAppUrl(row.phone, text);
+    }
+
+    whatsAppLink(row) {
+        const url = this.reminderUrl(row);
+        if (!url) return '';
+        return `<a class="btn btn-sm btn-success" href="${url}" target="_blank" rel="noopener"><i class="fas fa-bell"></i> Remind</a>`;
+    }
+
     async sendReminders() {
-        const totalDues = this.installmentDues.length + this.cashSaleDues.length;
-        
-        if (totalDues === 0) {
+        const rows = this.currentTab === 'cash-sale-dues' ? this.cashSaleDues : this.installmentDues;
+        if (!rows.length) {
             app.showNotification('No dues to send reminders for', 'info');
             return;
         }
-
-        const confirmed = confirm(`Send reminders to ${totalDues} customers with outstanding dues?`);
-        if (!confirmed) return;
-
-        try {
-            app.showLoading();
-            
-            // In a real implementation, this would send SMS/email reminders
-            // For now, we'll just simulate the process
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            app.showNotification(`Reminders sent to ${totalDues} customers successfully`, 'success');
-        } catch (error) {
-            console.error('Error sending reminders:', error);
-            app.showNotification('Failed to send reminders', 'error');
-        } finally {
-            app.hideLoading();
+        const withPhone = rows.filter((r) => r.phone);
+        if (!withPhone.length) {
+            app.showNotification('No phone numbers on these dues', 'info');
+            return;
+        }
+        const first = this.reminderUrl(withPhone[0]);
+        if (!first) {
+            app.showNotification('Could not build WhatsApp link', 'error');
+            return;
+        }
+        window.open(first, '_blank', 'noopener');
+        if (withPhone.length > 1) {
+            app.showNotification('Opened WhatsApp for the first customer. Use Remind on each remaining row.', 'info');
         }
     }
 
-    async sendSingleReminder(type, customerId) {
-        try {
-            app.showLoading();
-            
-            // Simulate sending reminder
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            app.showNotification('Reminder sent successfully', 'success');
-        } catch (error) {
-            console.error('Error sending reminder:', error);
-            app.showNotification('Failed to send reminder', 'error');
-        } finally {
-            app.hideLoading();
+    sendSingleReminder(type, customerId) {
+        const list = type === 'cash_sale' ? this.cashSaleDues : this.installmentDues;
+        const row = list.find((item) => Number(item.customer_id) === Number(customerId));
+        const url = this.reminderUrl(row);
+        if (!url) {
+            app.showNotification('No WhatsApp number for this customer', 'error');
+            return;
         }
+        window.open(url, '_blank', 'noopener');
     }
 
-    async sendUrgentReminder(type, id) {
-        try {
-            app.showLoading();
-            
-            // Simulate sending urgent reminder
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            app.showNotification('Urgent reminder sent successfully', 'success');
-        } catch (error) {
-            console.error('Error sending urgent reminder:', error);
-            app.showNotification('Failed to send urgent reminder', 'error');
-        } finally {
-            app.hideLoading();
+    sendUrgentReminder(type, id) {
+        const row = this.overdueItems.find((item) => item.type === type && Number(item.customer_id || item.id) === Number(id));
+        const url = this.reminderUrl(row);
+        if (!url) {
+            app.showNotification('No WhatsApp number for this customer', 'error');
+            return;
         }
+        window.open(url, '_blank', 'noopener');
     }
 
     async viewInstallmentDetails(customerId) {

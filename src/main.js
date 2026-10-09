@@ -483,8 +483,15 @@ ipcMain.handle('drive-restore', async (event, filePath) => {
 
 ipcMain.handle('customer-photo-pick', async (event, { customerId, kind } = {}) => {
   if (!mainWindow || !customerId) return { ok: false };
+  const kindMap = {
+    photo: { title: 'Choose customer photo', file: 'photo', column: 'photo_path' },
+    cnic: { title: 'Choose CNIC front photo', file: 'cnic-front', column: 'cnic_front_photo_path' },
+    'cnic-front': { title: 'Choose CNIC front photo', file: 'cnic-front', column: 'cnic_front_photo_path' },
+    'cnic-back': { title: 'Choose CNIC back photo', file: 'cnic-back', column: 'cnic_back_photo_path' }
+  };
+  const meta = kindMap[kind] || kindMap.photo;
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: kind === 'cnic' ? 'Choose CNIC photo' : 'Choose customer photo',
+    title: meta.title,
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
     properties: ['openFile']
   });
@@ -492,12 +499,11 @@ ipcMain.handle('customer-photo-pick', async (event, { customerId, kind } = {}) =
   const photosDir = path.join(app.getPath('userData'), 'photos');
   if (!fs.existsSync(photosDir)) fs.mkdirSync(photosDir, { recursive: true });
   const ext = path.extname(result.filePaths[0]).toLowerCase() || '.jpg';
-  const dest = path.join(photosDir, `${kind === 'cnic' ? 'cnic' : 'photo'}-${customerId}${ext}`);
+  const dest = path.join(photosDir, `${meta.file}-${customerId}${ext}`);
   fs.copyFileSync(result.filePaths[0], dest);
-  if (kind === 'cnic') {
+  await db.run(`UPDATE customers SET ${meta.column} = ? WHERE id = ?`, [dest, customerId]);
+  if (meta.column === 'cnic_front_photo_path') {
     await db.run('UPDATE customers SET cnic_photo_path = ? WHERE id = ?', [dest, customerId]);
-  } else {
-    await db.run('UPDATE customers SET photo_path = ? WHERE id = ?', [dest, customerId]);
   }
   return { ok: true, path: dest };
 });

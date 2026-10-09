@@ -715,12 +715,12 @@ class Database {
             const overdueSql = today
                 ? `SELECT COUNT(*) as count
                    FROM installments
-                   WHERE due_date < ?
+                   WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', ?)
                      AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
                      AND (is_deleted = 0 OR is_deleted IS NULL)`
                 : `SELECT COUNT(*) as count
                    FROM installments
-                   WHERE due_date < date('now')
+                   WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', date('now'))
                      AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
                      AND (is_deleted = 0 OR is_deleted IS NULL)`;
             const overdueResult = await this.get(overdueSql, today ? [today] : []);
@@ -841,7 +841,7 @@ class Database {
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
-            WHERE i.due_date < ?
+            WHERE strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
               AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
             ORDER BY i.due_date ASC
@@ -1280,7 +1280,7 @@ class Database {
         const today = (typeof Utils !== 'undefined' && Utils.toLocalDateString)
             ? Utils.toLocalDateString(new Date())
             : new Date().toISOString().slice(0, 10);
-        return await this.safeQuery(`
+        const rows = await this.safeQuery(`
             SELECT 
                 i.*,
                 c.customer_name,
@@ -1292,24 +1292,27 @@ class Database {
                     WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
                     THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)
                     ELSE 0
-                END as remaining_amount,
-                CASE 
-                    WHEN i.due_date < ?
-                    THEN CAST(julianday(?) - julianday(i.due_date) as INTEGER)
-                    ELSE 0
-                END as days_overdue
+                END as remaining_amount
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
             WHERE COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-              AND (i.status = 'short' OR i.due_date < ?)
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
               AND cp.status != 'deleted'
             ORDER BY i.due_date ASC
-        `, [today, today, today], []);
+        `, [], []);
+        if (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.groupCustomerDues) {
+            return InstallmentEngine.groupCustomerDues(rows || [], today).map((g) => ({
+                ...g,
+                remaining_amount: g.amount,
+                days_overdue: g.kind === 'short' ? 1 : 0,
+                item_name: g.kind === 'short' ? 'Short' : 'Current installment'
+            }));
+        }
+        return rows || [];
     }
 
     static async getCashSaleDues() {
@@ -1351,7 +1354,7 @@ class Database {
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
-            WHERE i.due_date < ?
+            WHERE strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
               AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)

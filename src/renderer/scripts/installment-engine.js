@@ -138,6 +138,98 @@
       };
     },
 
+    isMonthPassed(dueDate, asOfDate) {
+      const dueYm = String(dueDate || '').slice(0, 7);
+      const asOfYm = String(asOfDate || '').slice(0, 7);
+      if (!dueYm || !asOfYm) return false;
+      return dueYm < asOfYm;
+    },
+
+    totalShort(rows, asOfDate) {
+      let short = 0;
+      for (const row of rows || []) {
+        if (!this.isMonthPassed(row.due_date, asOfDate)) continue;
+        const original = Number(row.original_amount) || 0;
+        const paid = Number(row.paid_amount) || 0;
+        short += Math.max(0, original - paid);
+      }
+      return short;
+    },
+
+    customerDueSummary(rows, asOfDate) {
+      const list = rows || [];
+      const short = this.totalShort(list, asOfDate);
+      if (short > 0) {
+        return { kind: 'short', amount: short };
+      }
+      const asOfYm = String(asOfDate || '').slice(0, 7);
+      const current = list.find((row) => {
+        const dueYm = String(row.due_date || '').slice(0, 7);
+        if (dueYm !== asOfYm) return false;
+        const remaining = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
+        return remaining > 0 && row.status !== 'paid' && row.status !== 'settled';
+      });
+      if (current) {
+        const amount = Math.max(0, (Number(current.original_amount) || 0) - (Number(current.paid_amount) || 0));
+        return { kind: 'current', amount, due_date: current.due_date };
+      }
+      return { kind: 'none', amount: 0 };
+    },
+
+    groupCustomerDues(rows, asOfDate) {
+      const byCustomer = new Map();
+      for (const row of rows || []) {
+        const id = row.customer_id;
+        if (!byCustomer.has(id)) byCustomer.set(id, []);
+        byCustomer.get(id).push(row);
+      }
+      const grouped = [];
+      for (const [customerId, list] of byCustomer.entries()) {
+        const summary = this.customerDueSummary(list, asOfDate);
+        const first = list[0] || {};
+        grouped.push({
+          customer_id: customerId,
+          customer_name: first.customer_name,
+          account_no: first.account_no,
+          phone: first.phone,
+          kind: summary.kind,
+          amount: summary.amount,
+          due_date: summary.due_date || first.due_date
+        });
+      }
+      return grouped.filter((g) => g.amount > 0);
+    },
+
+    buildReceivableRows(rows, asOfDate) {
+      const rec = this.reconcile(rows, asOfDate);
+      const paperRows = rec.rows.map((row, index) => {
+        const original = Number(row.original_amount) || 0;
+        const paid = Number(row.paid_amount) || 0;
+        const remaining = Math.max(0, original - paid);
+        const short = this.isMonthPassed(row.due_date, asOfDate) ? remaining : 0;
+        return {
+          serial: index + 1,
+          due_date: row.due_date,
+          account_no: row.account_no || '',
+          name: row.customer_name || '',
+          phone: row.phone || '',
+          model: row.item_name || '',
+          installment_no: row.installment_no,
+          ins_rs: original,
+          short,
+          received: paid,
+          final_bal: remaining
+        };
+      });
+      const footer = paperRows.reduce((acc, row) => {
+        acc.short += row.short;
+        acc.received += row.received;
+        acc.final_bal += row.final_bal;
+        return acc;
+      }, { short: 0, received: 0, final_bal: 0 });
+      return { rows: paperRows, footer };
+    },
+
     reconcile(rows, todayLocalDateString) {
       const copies = (rows || []).map((row) => ({ ...row }));
       copies.sort((a, b) => a.installment_no - b.installment_no);
@@ -147,7 +239,7 @@
       for (const row of copies) {
         const original = Number(row.original_amount) || 0;
         const paid = Number(row.paid_amount) || 0;
-        const isOverdue = row.due_date < todayLocalDateString;
+        const isOverdue = this.isMonthPassed(row.due_date, todayLocalDateString);
 
         if (isOverdue) {
           const unpaid = original + runningShortage - paid;
