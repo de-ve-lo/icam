@@ -235,7 +235,7 @@
                         </div>
                         <div class="card-content">
                             <h3 id="overdue-installments">0</h3>
-                            <p>Overdue Installments</p>
+                            <p>Overdue Customers</p>
                         </div>
                     </div>
                 </div>
@@ -545,7 +545,7 @@
                             </button>
                         </div>
                     </div>
-                    <p class="text-muted">Select a date range to filter all reports. Leave blank to use current month data.</p>
+                    <p class="text-muted">As-of reports use End date only. Period reports use Start–End.</p>
                 </div>
                 
                 <div class="reports-grid">
@@ -555,13 +555,18 @@
                         <button class="btn btn-primary" onclick="window.reports.generate('monthly')">Generate</button>
                     </div>
                     <div class="report-card">
+                        <h3>Customer-wise Collection</h3>
+                        <p>Who paid in the selected period</p>
+                        <button class="btn btn-primary" onclick="window.reports.generate('customer-collection')">Generate</button>
+                    </div>
+                    <div class="report-card">
                         <h3>Customer Outstanding Report</h3>
-                        <p>All pending amounts across modules</p>
+                        <p>Short, current, and total per customer.</p>
                         <button class="btn btn-primary" onclick="window.reports.generate('outstanding')">Generate</button>
                     </div>
                     <div class="report-card">
                         <h3>Installment Receivable and Received</h3>
-                        <p>Paper-format short, received, and final balance as of end date</p>
+                        <p>Call list: short and remaining due as of end date.</p>
                         <button class="btn btn-primary" onclick="window.reports.generate('receivable')">Generate</button>
                     </div>
                     <div class="report-card">
@@ -756,6 +761,7 @@
     <script src="../../assets/chart.umd.js"></script>
     <script src="scripts/database.js"></script>
     <script src="scripts/installment-engine.js"></script>
+    <script src="scripts/stock-ledger.js"></script>
     <script src="scripts/utils.js"></script>
     <script src="scripts/products.js"></script>
     <script src="scripts/suppliers.js"></script>

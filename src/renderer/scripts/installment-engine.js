@@ -156,24 +156,38 @@
       return short;
     },
 
+    currentUnpaid(rows, asOfDate) {
+      const asOfYm = String(asOfDate || '').slice(0, 7);
+      let current = 0;
+      let dueDate = null;
+      for (const row of rows || []) {
+        const dueYm = String(row.due_date || '').slice(0, 7);
+        if (dueYm !== asOfYm) continue;
+        if (row.status === 'paid' || row.status === 'settled') continue;
+        const leftover = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
+        if (leftover <= 0) continue;
+        current += leftover;
+        if (!dueDate) dueDate = row.due_date;
+      }
+      return { current, dueDate };
+    },
+
     customerDueSummary(rows, asOfDate) {
       const list = rows || [];
       const short = this.totalShort(list, asOfDate);
-      if (short > 0) {
-        return { kind: 'short', amount: short };
+      const { current, dueDate } = this.currentUnpaid(list, asOfDate);
+      const total = short + current;
+      let kind = 'none';
+      if (short > 0 && current > 0) kind = 'both';
+      else if (short > 0) kind = 'short';
+      else if (current > 0) kind = 'current';
+      let due_date = dueDate;
+      if (!due_date && short > 0) {
+        const shortRow = list.find((row) => this.isMonthPassed(row.due_date, asOfDate)
+          && Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0)) > 0);
+        due_date = shortRow ? shortRow.due_date : null;
       }
-      const asOfYm = String(asOfDate || '').slice(0, 7);
-      const current = list.find((row) => {
-        const dueYm = String(row.due_date || '').slice(0, 7);
-        if (dueYm !== asOfYm) return false;
-        const remaining = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
-        return remaining > 0 && row.status !== 'paid' && row.status !== 'settled';
-      });
-      if (current) {
-        const amount = Math.max(0, (Number(current.original_amount) || 0) - (Number(current.paid_amount) || 0));
-        return { kind: 'current', amount, due_date: current.due_date };
-      }
-      return { kind: 'none', amount: 0 };
+      return { short, current, total, kind, due_date };
     },
 
     groupCustomerDues(rows, asOfDate) {
@@ -193,41 +207,69 @@
           account_no: first.account_no,
           phone: first.phone,
           kind: summary.kind,
-          amount: summary.amount,
+          short: summary.short,
+          current: summary.current,
+          total: summary.total,
+          amount: summary.total,
           due_date: summary.due_date || first.due_date
         });
       }
-      return grouped.filter((g) => g.amount > 0);
+      return grouped.filter((g) => g.total > 0);
+    },
+
+    buildReceivableCustomerRows(installmentRows, paymentRows, asOfDate, customerIdsOrNull) {
+      const byCustomer = new Map();
+      for (const row of installmentRows || []) {
+        const id = row.customer_id;
+        if (id == null) continue;
+        if (!byCustomer.has(id)) byCustomer.set(id, []);
+        byCustomer.get(id).push(row);
+      }
+      const receivedByCustomer = new Map();
+      for (const pay of paymentRows || []) {
+        const isPayment = (pay.type || 'payment') === 'payment';
+        if (!isPayment) continue;
+        if (pay.is_deleted) continue;
+        if (String(pay.payment_date || '') > String(asOfDate || '')) continue;
+        const id = pay.customer_id;
+        receivedByCustomer.set(id, (receivedByCustomer.get(id) || 0) + (Number(pay.amount) || 0));
+      }
+      const ids = (customerIdsOrNull && customerIdsOrNull.length)
+        ? customerIdsOrNull.slice()
+        : Array.from(byCustomer.keys());
+      const rows = [];
+      for (const id of ids) {
+        const list = byCustomer.get(id) || [];
+        const summary = this.customerDueSummary(list, asOfDate);
+        const first = list[0] || {};
+        const remaining_to_end = summary.total;
+        if (!(customerIdsOrNull && customerIdsOrNull.length) && remaining_to_end <= 0) continue;
+        rows.push({
+          customer_id: id,
+          account_no: first.account_no || '',
+          name: first.customer_name || '',
+          phone: first.phone || '',
+          short: summary.short,
+          current: summary.current,
+          received: receivedByCustomer.get(id) || 0,
+          remaining_to_end
+        });
+      }
+      rows.sort((a, b) => String(a.account_no).localeCompare(String(b.account_no))
+        || String(a.name).localeCompare(String(b.name)));
+      rows.forEach((row, index) => { row.serial = index + 1; });
+      const footer = rows.reduce((acc, row) => {
+        acc.short += row.short;
+        acc.current += row.current;
+        acc.received += row.received;
+        acc.remaining_to_end += row.remaining_to_end;
+        return acc;
+      }, { short: 0, current: 0, received: 0, remaining_to_end: 0 });
+      return { rows, footer };
     },
 
     buildReceivableRows(rows, asOfDate) {
-      const rec = this.reconcile(rows, asOfDate);
-      const paperRows = rec.rows.map((row, index) => {
-        const original = Number(row.original_amount) || 0;
-        const paid = Number(row.paid_amount) || 0;
-        const remaining = Math.max(0, original - paid);
-        const short = this.isMonthPassed(row.due_date, asOfDate) ? remaining : 0;
-        return {
-          serial: index + 1,
-          due_date: row.due_date,
-          account_no: row.account_no || '',
-          name: row.customer_name || '',
-          phone: row.phone || '',
-          model: row.item_name || '',
-          installment_no: row.installment_no,
-          ins_rs: original,
-          short,
-          received: paid,
-          final_bal: remaining
-        };
-      });
-      const footer = paperRows.reduce((acc, row) => {
-        acc.short += row.short;
-        acc.received += row.received;
-        acc.final_bal += row.final_bal;
-        return acc;
-      }, { short: 0, received: 0, final_bal: 0 });
-      return { rows: paperRows, footer };
+      return this.buildReceivableCustomerRows(rows, [], asOfDate, null);
     },
 
     reconcile(rows, todayLocalDateString) {

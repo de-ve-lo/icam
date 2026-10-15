@@ -222,6 +222,10 @@ class StockManager {
                                     ${this.suppliers.map(s => `<option value="${s.id}">${Utils.capitalizeWords(s.supplier_name)}</option>`).join('')}
                                 </select>
                             </div>
+                            <div class="form-group">
+                                <label class="form-label required">Purchase price</label>
+                                <input type="number" name="purchase_price" class="form-input" required min="0" step="0.01" value="">
+                            </div>
                             <div id="stock-category-fields"></div>
                             <div class="form-group">
                                 <label class="form-label required">Stock Date</label>
@@ -268,6 +272,10 @@ class StockManager {
                                 <select name="supplier_id" class="form-input" required>
                                     ${this.suppliers.map(s => `<option value="${s.id}" ${s.id === item.supplier_id ? 'selected' : ''}>${Utils.capitalizeWords(s.supplier_name)}</option>`).join('')}
                                 </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label required">Purchase price</label>
+                                <input type="number" name="purchase_price" class="form-input" required min="0" step="0.01" value="${item && item.purchase_price != null ? item.purchase_price : ''}">
                             </div>
                             <div id="stock-category-fields"></div>
                             <div class="form-group">
@@ -333,13 +341,35 @@ class StockManager {
         const productSelect = document.querySelector('#stock-form [name="product_id"]');
         const fields = document.getElementById('stock-category-fields');
         if (!productSelect || !fields) return;
+        const purchasePriceInput = document.querySelector('#stock-form [name="purchase_price"]');
+        let purchasePriceDirty = false;
+        const selectedProduct = () => this.products.find(p => String(p.id) === String(productSelect.value));
+        const applyProductPrice = () => {
+            if (!purchasePriceInput || purchasePriceDirty) return;
+            const product = selectedProduct();
+            if (product && product.purchase_price != null) {
+                purchasePriceInput.value = product.purchase_price;
+            }
+        };
+        if (purchasePriceInput) {
+            purchasePriceInput.addEventListener('input', () => { purchasePriceDirty = true; });
+        }
         const render = () => {
-            const product = this.products.find(p => String(p.id) === String(productSelect.value));
+            const product = selectedProduct();
             const category = product ? (product.category || 'bike') : 'bike';
             fields.innerHTML = this.categoryFieldsHtml(category, item || {});
         };
-        productSelect.addEventListener('change', render);
+        productSelect.addEventListener('change', () => {
+            render();
+            applyProductPrice();
+        });
         render();
+        // One-time initial prefill: keep the item's saved snapshot price; otherwise use the selected product's price.
+        if (purchasePriceInput && item && item.purchase_price != null) {
+            purchasePriceInput.value = item.purchase_price;
+        } else {
+            applyProductPrice();
+        }
     }
 
     async save(existingId = null) {
@@ -349,6 +379,11 @@ class StockManager {
         const formData = new FormData(form);
         const product = this.products.find(p => String(p.id) === String(formData.get('product_id')));
         const category = product ? (product.category || 'bike') : 'bike';
+        const purchase_price = parseFloat(formData.get('purchase_price'));
+        if (!(purchase_price > 0)) {
+            app.showNotification('Purchase price must be greater than 0', 'error');
+            return;
+        }
         const stock = {
             product_id: parseInt(formData.get('product_id')),
             supplier_id: parseInt(formData.get('supplier_id')),
@@ -358,6 +393,7 @@ class StockManager {
             reg_no: (formData.get('reg_no') || '').trim() || null,
             serial_no: (formData.get('serial_no') || '').trim() || null,
             quantity: parseInt(formData.get('quantity') || '1', 10) || 1,
+            purchase_price,
             stock_date: formData.get('stock_date'),
             stock_no: formData.get('stock_no').trim()
         };
@@ -406,9 +442,9 @@ class StockManager {
 
             if (existingId) {
                 await Database.run(`
-                    UPDATE stock SET product_id = ?, supplier_id = ?, engine_no = ?, chassis_no = ?, imei = ?, reg_no = ?, serial_no = ?, quantity = ?, stock_date = ?, stock_no = ?, updated_at = CURRENT_TIMESTAMP
+                    UPDATE stock SET product_id = ?, supplier_id = ?, engine_no = ?, chassis_no = ?, imei = ?, reg_no = ?, serial_no = ?, quantity = ?, purchase_price = ?, stock_date = ?, stock_no = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                `, [stock.product_id, stock.supplier_id, stock.engine_no, stock.chassis_no, stock.imei, stock.reg_no, stock.serial_no, stock.quantity, stock.stock_date, stock.stock_no, existingId]);
+                `, [stock.product_id, stock.supplier_id, stock.engine_no, stock.chassis_no, stock.imei, stock.reg_no, stock.serial_no, stock.quantity, stock.purchase_price, stock.stock_date, stock.stock_no, existingId]);
                 app.showNotification('Stock item updated successfully!', 'success');
             } else {
                 await Database.addStock(stock);

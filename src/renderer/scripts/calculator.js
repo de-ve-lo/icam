@@ -662,16 +662,48 @@ class InstallmentCalculator {
             // Create installment schedule
             await Database.createInstallments(purchaseId, schedule);
 
+            app.hideLoading();
             app.showNotification('Installment plan created successfully!', 'success');
             this.currentCalculation = null;
             await this.initialize();
             app.closeModal();
 
-            const confirmPrint = confirm('Installment plan created successfully! Would you like to print the payment schedule?');
-            if (confirmPrint) {
-                const customer = this.customers.find(c => c.id === customerId);
-                await this.generateSchedulePDF(customer, product, stockItem, summary, schedule);
-            }
+            const customer = this.customers.find(c => c.id === customerId);
+            const summaryCopy = summary;
+            const productCopy = product;
+            const stockCopy = stockItem;
+            const scheduleCopy = schedule;
+
+            const modalHtml = `
+                <div class="modal">
+                    <div class="modal-content modal-sm">
+                        <div class="modal-header">
+                            <h3>Installment plan created</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Print payment schedule?</p>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" id="plan-print-skip">Skip</button>
+                            <button type="button" class="btn btn-primary" id="plan-print-ok">Print</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            app.showModal(modalHtml);
+            const skip = () => {
+                app.closeModal();
+                const search = document.getElementById('global-search');
+                if (search) search.focus();
+            };
+            document.getElementById('plan-print-skip').addEventListener('click', skip);
+            document.getElementById('plan-print-ok').addEventListener('click', async () => {
+                app.closeModal();
+                await this.generateSchedulePDF(customer, productCopy, stockCopy, summaryCopy, scheduleCopy);
+                const search = document.getElementById('global-search');
+                if (search) search.focus();
+            });
 
             if (app.currentSection === 'dashboard' && app.dashboard) {
                 app.dashboard.loadData();

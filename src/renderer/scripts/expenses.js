@@ -128,11 +128,15 @@ class ExpensesManager {
         container.innerHTML = table;
     }
 
+    userExpenseTypes() {
+        return (this.expenseTypes || []).filter((t) => t.name !== 'Staff Salary');
+    }
+
     renderExpenseTypes() {
         const container = document.getElementById('expense-types-list');
         if (!container) return;
 
-        if (this.expenseTypes.length === 0) {
+        if (this.userExpenseTypes().length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-tags"></i>
@@ -148,7 +152,7 @@ class ExpensesManager {
 
         const typesList = `
             <div class="expense-types-grid">
-                ${this.expenseTypes.map(type => {
+                ${this.userExpenseTypes().map(type => {
                     const typeExpenses = this.expenses.filter(exp => exp.expense_type_id === type.id);
                     const typeTotal = typeExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
                     
@@ -186,7 +190,7 @@ class ExpensesManager {
     }
 
     openAddExpenseModal() {
-        if (this.expenseTypes.length === 0) {
+        if (this.userExpenseTypes().length === 0) {
             app.showNotification('Please create at least one expense type first', 'warning');
             this.openAddExpenseTypeModal();
             return;
@@ -206,7 +210,7 @@ class ExpensesManager {
                                 <div class="input-group">
                                     <select name="expense_type_id" class="form-input" required>
                                         <option value="">Select Expense Type</option>
-                                        ${this.expenseTypes.map(type => `
+                                        ${this.userExpenseTypes().map(type => `
                                             <option value="${type.id}">${type.name}</option>
                                         `).join('')}
                                     </select>
@@ -313,6 +317,11 @@ class ExpensesManager {
             name: formData.get('name'),
             description: formData.get('description')
         };
+
+        if (String(expenseType.name || '').trim().toLowerCase() === 'staff salary') {
+            app.showNotification('Staff salary is entered in Staff, not here', 'error');
+            return;
+        }
 
         try {
             app.showLoading();

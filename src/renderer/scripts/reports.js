@@ -120,10 +120,12 @@ class ReportsManager {
 
     async loadCollectionFromPayments(start, end) {
         return await this.safeQuery(`
-            SELECT payment_date, amount, type, customer_id, installment_id, receipt_no
-            FROM payments
-            WHERE DATE(payment_date) BETWEEN DATE(?) AND DATE(?)
-              AND (is_deleted = 0 OR is_deleted IS NULL)
+            SELECT p.payment_date, p.amount, p.type, p.customer_id, p.installment_id, p.receipt_no,
+                   c.customer_name
+            FROM payments p
+            LEFT JOIN customers c ON c.id = p.customer_id
+            WHERE DATE(p.payment_date) BETWEEN DATE(?) AND DATE(?)
+              AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
         `, [start, end], []);
     }
 
@@ -262,55 +264,6 @@ class ReportsManager {
         }
     }
 
-    getSelectedDateRange() {
-        // Use temporary date range if available (from popup)
-        if (this.tempDateRange) {
-            return {
-                startDate: new Date(this.tempDateRange.startDate),
-                endDate: new Date(this.tempDateRange.endDate),
-                startDateStr: this.tempDateRange.startDate,
-                endDateStr: this.tempDateRange.endDate
-            };
-        }
-        
-        const startDateInput = document.getElementById('reports-start-date');
-        const endDateInput = document.getElementById('reports-end-date');
-        
-        if (!startDateInput || !endDateInput) {
-            const now = new Date();
-            const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            return {
-                startDate,
-                endDate,
-                startDateStr: this.formatDateForInput(startDate),
-                endDateStr: this.formatDateForInput(endDate)
-            };
-        }
-        
-        const startDateStr = startDateInput.value;
-        const endDateStr = endDateInput.value;
-        
-        if (!startDateStr || !endDateStr) {
-            const now = new Date();
-            const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            return {
-                startDate,
-                endDate,
-                startDateStr: this.formatDateForInput(startDate),
-                endDateStr: this.formatDateForInput(endDate)
-            };
-        }
-        
-        return {
-            startDate: new Date(startDateStr),
-            endDate: new Date(endDateStr),
-            startDateStr,
-            endDateStr
-        };
-    }
-
     async generateMonthlyReport() {
         try {
             console.log('Generating monthly report...');
@@ -323,6 +276,122 @@ class ReportsManager {
         } catch (error) {
             console.error('Error generating monthly report:', error);
             this.safeShowNotification(`Failed to generate monthly report: ${error.message}`, 'error');
+        } finally {
+            this.safeHideLoading();
+        }
+    }
+
+    async generateCustomerCollection() {
+        try {
+            this.safeShowLoading();
+            const range = this.getLocalRange();
+            const shopName = await this.getShopName();
+            const payments = await this.safeQuery(`
+                SELECT p.customer_id,
+                       COALESCE(c.account_no, 'N/A') as account_no,
+                       COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
+                       COALESCE(SUM(p.amount), 0) as total
+                FROM payments p
+                LEFT JOIN customers c ON c.id = p.customer_id
+                WHERE DATE(p.payment_date) BETWEEN DATE(?) AND DATE(?)
+                  AND (p.type = 'payment' OR p.type IS NULL)
+                  AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+                GROUP BY p.customer_id
+            `, [range.start, range.end], []);
+            const advances = await this.safeQuery(`
+                SELECT cp.customer_id,
+                       COALESCE(c.account_no, 'N/A') as account_no,
+                       COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
+                       COALESCE(SUM(cp.advance_received), 0) as total
+                FROM customer_purchases cp
+                LEFT JOIN customers c ON c.id = cp.customer_id
+                WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
+                  AND COALESCE(cp.advance_received, 0) > 0
+                  AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                GROUP BY cp.customer_id
+            `, [range.start, range.end], []);
+            const cashSales = await this.safeQuery(`
+                SELECT cs.customer_id,
+                       COALESCE(c.account_no, 'N/A') as account_no,
+                       COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
+                       COALESCE(SUM(cs.received_price), 0) as total
+                FROM cash_sales cs
+                LEFT JOIN customers c ON c.id = cs.customer_id
+                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
+                  AND cs.received_price > 0
+                GROUP BY cs.customer_id
+            `, [range.start, range.end], []);
+            const byCustomer = new Map();
+            const keyFor = (id) => (id == null ? 'walkin' : String(id));
+            const merge = (rows, field) => {
+                for (const r of rows || []) {
+                    const key = keyFor(r.customer_id);
+                    if (!byCustomer.has(key)) {
+                        byCustomer.set(key, {
+                            account_no: r.account_no,
+                            customer_name: r.customer_name,
+                            payments: 0,
+                            advances: 0,
+                            cashSales: 0
+                        });
+                    }
+                    const entry = byCustomer.get(key);
+                    entry[field] += Number(r.total) || 0;
+                }
+            };
+            merge(payments, 'payments');
+            merge(advances, 'advances');
+            merge(cashSales, 'cashSales');
+            const rows = Array.from(byCustomer.values())
+                .map((r) => ({ ...r, totalIn: r.payments + r.advances + r.cashSales }))
+                .sort((a, b) => String(a.account_no).localeCompare(String(b.account_no))
+                    || String(a.customer_name).localeCompare(String(b.customer_name)));
+            if (!rows.length) {
+                this.renderReport(this.emptyReport('Customer-wise Collection'));
+                return;
+            }
+            const sum = (key) => rows.reduce((s, r) => s + r[key], 0);
+            const inner = `
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Name</th>
+                            <th>Payments</th>
+                            <th>Advances</th>
+                            <th>Cash sales</th>
+                            <th>Total in</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((r) => `
+                            <tr>
+                                <td>${r.account_no}</td>
+                                <td>${r.customer_name}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.payments)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.advances)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.cashSales)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.totalIn)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2"><strong>Totals</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(sum('payments'))}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(sum('advances'))}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(sum('cashSales'))}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(sum('totalIn'))}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+                </div>
+            `;
+            this.renderReport(this.wrapPanel('Customer-wise Collection', `${range.start} to ${range.end}`, inner, shopName));
+        } catch (error) {
+            console.error('Error generating customer collection:', error);
+            this.safeShowNotification('Failed to generate customer-wise collection', 'error');
         } finally {
             this.safeHideLoading();
         }
@@ -411,6 +480,8 @@ class ReportsManager {
         switch (type) {
             case 'monthly':
                 return await this.generateMonthlyReport();
+            case 'customer-collection':
+                return await this.generateCustomerCollection();
             case 'outstanding':
                 return await this.generateOutstandingReport();
             case 'receivable':
@@ -496,6 +567,8 @@ class ReportsManager {
     }
 
     async generateReceivableReceived() {
+        const choice = await this.promptReceivableCustomers();
+        if (!choice) return;
         try {
             this.safeShowLoading();
             const asOf = this.getLocalRange().end;
@@ -506,6 +579,7 @@ class ReportsManager {
                     COALESCE(i.original_amount, i.amount) as original_amount,
                     COALESCE(i.paid_amount, 0) as paid_amount,
                     c.customer_name, c.account_no, c.phone,
+                    c.id as customer_id,
                     COALESCE(p.item_name, '') as item_name
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
@@ -517,54 +591,52 @@ class ReportsManager {
                   AND cp.status != 'deleted'
                 ORDER BY i.due_date, c.account_no, i.installment_no
             `, [], []);
-            if (!raw.length) {
+            const payments = await this.safeQuery(`
+                SELECT customer_id, amount, payment_date, type, is_deleted FROM payments
+            `, [], []);
+            const selectedIds = choice.mode === 'ids' ? choice.ids : null;
+            const paper = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.buildReceivableCustomerRows)
+                ? InstallmentEngine.buildReceivableCustomerRows(raw, payments, asOf, selectedIds)
+                : { rows: [], footer: { short: 0, current: 0, received: 0, remaining_to_end: 0 } };
+            if (!paper.rows.length) {
                 this.renderReport(this.emptyReport('Installment Receivable and Received'));
                 return;
             }
-            const paper = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.buildReceivableRows)
-                ? InstallmentEngine.buildReceivableRows(raw, asOf)
-                : { rows: [], footer: { short: 0, received: 0, final_bal: 0 } };
             const inner = `
+                <p>Who to contact. Short through ${asOf}. Remaining due through ${asOf}.</p>
                 <div class="table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>S.#</th>
-                            <th>Due Date</th>
-                            <th>Acc.#</th>
+                            <th>Acc#</th>
                             <th>Name</th>
                             <th>Phone</th>
-                            <th>Model</th>
-                            <th>Ins.#</th>
-                            <th>Ins.Rs.</th>
                             <th>Short</th>
+                            <th>Current</th>
                             <th>Recvd</th>
-                            <th>FinalBal</th>
+                            <th>Remaining to end</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${paper.rows.map((r) => `
                             <tr>
-                                <td>${r.serial}</td>
-                                <td>${this.safeFormatDate(r.due_date)}</td>
                                 <td>${r.account_no}</td>
                                 <td>${r.name}</td>
                                 <td>${r.phone}</td>
-                                <td>${r.model}</td>
-                                <td>${r.installment_no}</td>
-                                <td>${this.safeFormatCurrency(r.ins_rs)}</td>
-                                <td>${this.safeFormatCurrency(r.short)}</td>
-                                <td>${this.safeFormatCurrency(r.received)}</td>
-                                <td>${this.safeFormatCurrency(r.final_bal)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.short)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.current)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.received)}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.remaining_to_end)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="8"><strong>Totals</strong></td>
-                            <td><strong>${this.safeFormatCurrency(paper.footer.short)}</strong></td>
-                            <td><strong>${this.safeFormatCurrency(paper.footer.received)}</strong></td>
-                            <td><strong>${this.safeFormatCurrency(paper.footer.final_bal)}</strong></td>
+                            <td colspan="3"><strong>Totals</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(paper.footer.short)}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(paper.footer.current)}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(paper.footer.received)}</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(paper.footer.remaining_to_end)}</strong></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -598,29 +670,49 @@ class ReportsManager {
     async getOutstandingData(asOf) {
         try {
             const asOfDate = asOf || this.getLocalRange().end;
-            const installmentDues = await this.safeQuery(`
-                SELECT 
+            const rawRows = await this.safeQuery(`
+                SELECT
+                    i.id, i.installment_no, i.due_date, i.status,
+                    COALESCE(i.original_amount, i.amount) as original_amount,
+                    COALESCE(i.paid_amount, 0) as paid_amount,
                     COALESCE(c.customer_name, 'N/A') as customer_name,
                     COALESCE(c.account_no, 'N/A') as account_no,
                     COALESCE(c.phone, 'N/A') as phone,
-                    cp.start_date,
-                    SUM(COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) as total_short_amount,
-                    COUNT(CASE WHEN i.status != 'paid' AND i.status != 'settled' THEN 1 END) as pending_installments,
-                    COUNT(CASE WHEN strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?) AND i.status != 'paid' AND i.status != 'settled' THEN 1 END) as overdue_installments,
-                    SUM(CASE WHEN strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
-                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as total_short,
-                    (SELECT MAX(p.payment_date) FROM payments p WHERE p.customer_id = c.id AND (p.type IS NULL OR p.type = 'payment') AND (p.is_deleted = 0 OR p.is_deleted IS NULL)) as last_payment_date
+                    c.id as customer_id,
+                    COALESCE(p.item_name, '') as item_name
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
                 JOIN customers c ON cp.customer_id = c.id
-                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                LEFT JOIN stock s ON cp.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
+                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
-                GROUP BY c.id, c.customer_name, c.account_no, c.phone, cp.id, cp.start_date
-                HAVING total_short_amount > 0
-                ORDER BY total_short_amount DESC
-            `, [asOfDate, asOfDate], []);
+                ORDER BY i.due_date ASC
+            `, [], []);
+            const lastPayRows = await this.safeQuery(`
+                SELECT customer_id, MAX(payment_date) as last_payment_date
+                FROM payments
+                WHERE (type IS NULL OR type = 'payment') AND (is_deleted = 0 OR is_deleted IS NULL)
+                GROUP BY customer_id
+            `, [], []);
+            const lastPayByCustomer = new Map();
+            for (const row of lastPayRows) {
+                lastPayByCustomer.set(row.customer_id, row.last_payment_date);
+            }
+            const grouped = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.groupCustomerDues)
+                ? InstallmentEngine.groupCustomerDues(rawRows, asOfDate)
+                : [];
+            const installmentDues = grouped.map((g) => ({
+                customer_name: g.customer_name,
+                account_no: g.account_no,
+                phone: g.phone,
+                short: g.short,
+                current: g.current,
+                total: g.total,
+                last_payment_date: lastPayByCustomer.get(g.customer_id) || null
+            }));
 
             // Get cash sale dues with customer details
             const cashSaleDues = await this.safeQuery(`
@@ -655,7 +747,7 @@ class ReportsManager {
 
     async getCashSalesReportData() {
         try {
-            const dateRange = this.getSelectedDateRange();
+            const range = this.getLocalRange();
             
             const data = await this.safeQuery(`
                 SELECT 
@@ -674,7 +766,7 @@ class ReportsManager {
                 JOIN products p ON s.product_id = p.id
                 WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
                 ORDER BY cs.sale_date DESC
-            `, [dateRange.startDateStr, dateRange.endDateStr], []);
+            `, [range.start, range.end], []);
             
             return data || [];
         } catch (error) {
@@ -685,7 +777,7 @@ class ReportsManager {
 
     async getSupplierPaymentsReportData() {
         try {
-            const dateRange = this.getSelectedDateRange();
+            const range = this.getLocalRange();
             
             const data = await this.safeQuery(`
                 SELECT 
@@ -699,7 +791,7 @@ class ReportsManager {
                 JOIN suppliers s ON sp.supplier_id = s.id
                 WHERE DATE(sp.payment_date) BETWEEN DATE(?) AND DATE(?)
                 ORDER BY sp.payment_date DESC
-            `, [dateRange.startDateStr, dateRange.endDateStr], []);
+            `, [range.start, range.end], []);
             
             return data || [];
         } catch (error) {
@@ -710,7 +802,7 @@ class ReportsManager {
 
     async getExpenseReportData() {
         try {
-            const dateRange = this.getSelectedDateRange();
+            const range = this.getLocalRange();
             
             const expenses = await this.safeQuery(`
                 SELECT 
@@ -721,8 +813,9 @@ class ReportsManager {
                 FROM expenses e
                 JOIN expense_types et ON e.expense_type_id = et.id
                 WHERE DATE(e.date) BETWEEN DATE(?) AND DATE(?)
+                  AND et.name != 'Staff Salary'
                 ORDER BY e.date DESC
-            `, [dateRange.startDateStr, dateRange.endDateStr], []);
+            `, [range.start, range.end], []);
 
             const expensesByType = await this.safeQuery(`
                 SELECT 
@@ -732,9 +825,10 @@ class ReportsManager {
                 FROM expenses e
                 JOIN expense_types et ON e.expense_type_id = et.id
                 WHERE DATE(e.date) BETWEEN DATE(?) AND DATE(?)
+                  AND et.name != 'Staff Salary'
                 GROUP BY et.id, et.name
                 ORDER BY total_amount DESC
-            `, [dateRange.startDateStr, dateRange.endDateStr], []);
+            `, [range.start, range.end], []);
 
             return {
                 expenses: expenses || [],
@@ -751,7 +845,7 @@ class ReportsManager {
 
     async getStockReportData() {
         try {
-            const dateRange = this.getSelectedDateRange();
+            const range = this.getLocalRange();
             const stockSummary = await this.safeQuery(`
                 SELECT 
                     p.item_name,
@@ -796,8 +890,7 @@ class ReportsManager {
                 WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
                 
                 ORDER BY sale_date DESC
-                LIMIT 50
-            `, [dateRange.startDateStr, dateRange.endDateStr, dateRange.startDateStr, dateRange.endDateStr], []);
+            `, [range.start, range.end, range.start, range.end], []);
 
             return {
                 stockSummary: stockSummary || [],
@@ -827,6 +920,7 @@ class ReportsManager {
         const hasErrors = data.error;
         const errorMessage = hasErrors ? `<div class="alert alert-danger"><strong>Warning:</strong> Some data could not be loaded: ${data.error}</div>` : '';
         const advances = data.advances || { total_amount: 0, transaction_count: 0 };
+        const payments = data.payments || [];
         const totalCollections = (data.installments.total_amount || 0) + (data.cashSales.total_amount || 0) + (advances.total_amount || 0);
         const totalTransactions = (data.installments.transaction_count || 0) + (data.cashSales.transaction_count || 0) + (advances.transaction_count || 0);
         if (totalCollections === 0 && !hasErrors) {
@@ -857,6 +951,42 @@ class ReportsManager {
                     <p>${data.cashSales.transaction_count || 0} sales</p>
                 </div>
             </div>
+            <div class="section">
+                <h4>Installment Receipts</h4>
+                ${payments.length > 0 ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Customer</th>
+                                <th>Receipt no</th>
+                                <th>Amount</th>
+                                <th>Source</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${payments.map((p) => `
+                                <tr>
+                                    <td>${this.safeFormatDate(p.payment_date)}</td>
+                                    <td>${p.customer_name || 'N/A'}</td>
+                                    <td>${p.receipt_no || 'N/A'}</td>
+                                    <td class="amount">${this.safeFormatCurrency(p.amount)}</td>
+                                    <td>Installment</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3"><strong>Total</strong></td>
+                                <td class="amount"><strong>${this.safeFormatCurrency(data.installments.total_amount || 0)}</strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                    </div>
+                ` : '<p class="text-muted">No installment receipts for this period.</p>'}
+            </div>
         `;
         this.renderReport(this.wrapPanel('Monthly Collection Report', data.dateRange || 'Current Period', inner, data.shopName));
     }
@@ -870,6 +1000,9 @@ class ReportsManager {
             this.renderReport(this.emptyReport('Outstanding Amounts Report'));
             return;
         }
+        const sumShort = installmentDues.reduce((s, d) => s + (Number(d.short) || 0), 0);
+        const sumCurrent = installmentDues.reduce((s, d) => s + (Number(d.current) || 0), 0);
+        const sumTotal = installmentDues.reduce((s, d) => s + (Number(d.total) || 0), 0);
         const inner = `
             ${errorMessage}
             <div class="section">
@@ -879,30 +1012,42 @@ class ReportsManager {
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th>Customer Name</th>
                                 <th>Account</th>
+                                <th>Name</th>
                                 <th>Phone</th>
-                                <th>Start Date</th>
-                                 <th>Remaining</th>
-                                 <th>Total Short</th>
-                                 <th>Overdue</th>
-                                 <th>Last Payment</th>
+                                <th>Short</th>
+                                <th>Current</th>
+                                <th>Total</th>
+                                <th>Last payment</th>
                             </tr>
                         </thead>
                         <tbody>
                             ${installmentDues.map(due => `
                                 <tr>
-                                    <td>${due.customer_name || 'N/A'}</td>
                                     <td>${due.account_no || 'N/A'}</td>
+                                    <td>${due.customer_name || 'N/A'}</td>
                                     <td>${due.phone || 'N/A'}</td>
-                                    <td>${this.safeFormatDate(due.start_date)}</td>
-                                    <td class="amount">${this.safeFormatCurrency(due.total_short_amount)}</td>
-                                    <td class="amount">${this.safeFormatCurrency(due.total_short || 0)}</td>
-                                    <td>${due.overdue_installments || 0}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.short)}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.current)}</td>
+                                    <td class="amount">${this.safeFormatCurrency(due.total)} ${this.whatsAppButton(due.phone, {
+                                        name: due.customer_name,
+                                        account: due.account_no,
+                                        amount: this.safeFormatCurrency(due.total),
+                                        due_date: data.asOf || ''
+                                    })}</td>
                                     <td>${due.last_payment_date ? this.safeFormatDate(due.last_payment_date) : 'N/A'}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
+                        <tfoot>
+                            <tr>
+                                <td colspan="3"><strong>Totals</strong></td>
+                                <td class="amount"><strong>${this.safeFormatCurrency(sumShort)}</strong></td>
+                                <td class="amount"><strong>${this.safeFormatCurrency(sumCurrent)}</strong></td>
+                                <td class="amount"><strong>${this.safeFormatCurrency(sumTotal)}</strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
                     </table>
                     </div>
                 ` : '<p class="text-muted">No outstanding installment dues</p>'}
@@ -939,9 +1084,8 @@ class ReportsManager {
                 ` : '<p class="text-muted">No outstanding cash sale dues</p>'}
             </div>
         `;
-        const totalShortSum = installmentDues.reduce((s, d) => s + (Number(d.total_short) || 0), 0);
         const asOfLabel = data.asOf ? `As of ${data.asOf}` : 'All dates';
-        this.renderReport(this.wrapPanel('Outstanding Amounts Report', asOfLabel, `<p><strong>Total Short (as of ${data.asOf || 'today'}):</strong> ${this.safeFormatCurrency(totalShortSum)}</p>${inner}`, data.shopName));
+        this.renderReport(this.wrapPanel('Outstanding Amounts Report', asOfLabel, inner, data.shopName));
     }
 
     showCashSalesReport(data) {
@@ -1046,6 +1190,7 @@ class ReportsManager {
         }
         const totalExpenses = expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
         const inner = `
+            <p class="text-muted">Staff salary is in Staff / Universal, not here.</p>
             <div class="summary-grid">
                 <div class="summary-card"><h4>Total Expenses</h4><div class="amount">${this.safeFormatCurrency(totalExpenses)}</div><p>${expenses.length} transactions</p></div>
             </div>
@@ -1224,7 +1369,7 @@ class ReportsManager {
                 return;
             }
             const rows = [
-                ...paymentRows.map((p) => ({ date: p.payment_date, source: 'Installment', party: p.receipt_no || '', amount: p.amount, kind: 'in' })),
+                ...paymentRows.map((p) => ({ date: p.payment_date, source: 'Installment', party: p.customer_name || p.receipt_no || '', amount: p.amount, kind: 'in' })),
                 ...advances.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'in' })),
                 ...cashSales.map((r) => ({ date: r.entry_date, source: r.source, party: r.party, amount: r.amount, kind: 'in' })),
                 ...expenses.map((r) => ({ date: r.entry_date, source: r.source, party: r.party || '', amount: r.amount, kind: 'out' })),
@@ -1274,7 +1419,7 @@ class ReportsManager {
         try {
             this.safeShowLoading();
             const shopName = await this.getShopName();
-            const today = this.formatDateForInput(new Date());
+            const asOf = this.getLocalRange().end;
             const rows = await this.safeQuery(`
                 SELECT
                     COALESCE(c.customer_name, 'N/A') as customer_name,
@@ -1302,11 +1447,19 @@ class ReportsManager {
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 GROUP BY c.id, c.customer_name, c.account_no, c.phone
                 ORDER BY (bucket_1_30 + bucket_31_60 + bucket_61_90 + bucket_90_plus) DESC
-            `, [today, today, today, today, today], []);
+            `, [asOf, asOf, asOf, asOf, asOf], []);
             if (!rows.length) {
                 this.renderReport(this.emptyReport('Overdue Aging'));
                 return;
             }
+            const foot = rows.reduce((acc, r) => {
+                acc.b1 += Number(r.bucket_1_30) || 0;
+                acc.b2 += Number(r.bucket_31_60) || 0;
+                acc.b3 += Number(r.bucket_61_90) || 0;
+                acc.b4 += Number(r.bucket_90_plus) || 0;
+                return acc;
+            }, { b1: 0, b2: 0, b3: 0, b4: 0 });
+            const totalShort = foot.b1 + foot.b2 + foot.b3 + foot.b4;
             const inner = `
                 <div class="table-container">
                 <table class="data-table">
@@ -1319,10 +1472,14 @@ class ReportsManager {
                             <th>31-60 Days</th>
                             <th>61-90 Days</th>
                             <th>90+ Days</th>
+                            <th>Total Short</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows.map((r) => `
+                        ${rows.map((r) => {
+                            const rowTotal = (Number(r.bucket_1_30) || 0) + (Number(r.bucket_31_60) || 0)
+                                + (Number(r.bucket_61_90) || 0) + (Number(r.bucket_90_plus) || 0);
+                            return `
                             <tr>
                                 <td>${r.customer_name}</td>
                                 <td>${r.account_no}</td>
@@ -1331,13 +1488,25 @@ class ReportsManager {
                                 <td>${this.safeFormatCurrency(r.bucket_31_60)}</td>
                                 <td>${this.safeFormatCurrency(r.bucket_61_90)}</td>
                                 <td>${this.safeFormatCurrency(r.bucket_90_plus)}</td>
+                                <td>${this.safeFormatCurrency(rowTotal)}</td>
                             </tr>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3"><strong>Totals</strong></td>
+                            <td><strong>${this.safeFormatCurrency(foot.b1)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(foot.b2)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(foot.b3)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(foot.b4)}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(totalShort)}</strong></td>
+                        </tr>
+                    </tfoot>
                 </table>
                 </div>
             `;
-            this.renderReport(this.wrapPanel('Overdue Aging', today, inner, shopName));
+            this.renderReport(this.wrapPanel('Overdue Aging', `As of ${asOf}`, inner, shopName));
         } catch (error) {
             console.error('Error generating overdue aging:', error);
             this.safeShowNotification('Failed to generate overdue aging', 'error');
@@ -1393,9 +1562,11 @@ class ReportsManager {
                   AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
             `, [customerId], []);
-            const totalShort = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.totalShort)
-                ? InstallmentEngine.totalShort(installmentRows, asOf)
-                : 0;
+            const dues = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.customerDueSummary)
+                ? InstallmentEngine.customerDueSummary(installmentRows, asOf)
+                : { short: 0, current: 0, total: 0 };
+            const bookRemaining = Math.max(0, remaining);
+            const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
             let photoHtml = '';
             if (customer.photo_path && window._ipcRenderer) {
                 try {
@@ -1410,8 +1581,10 @@ class ReportsManager {
                 <p><strong>Customer:</strong> ${customer.customer_name || ''} &nbsp;
                    <strong>Account:</strong> ${customer.account_no || 'N/A'} &nbsp;
                    <strong>Phone:</strong> ${customer.phone || 'N/A'}</p>
-                <p><strong>Remaining:</strong> ${this.safeFormatCurrency(remaining)} &nbsp;
-                   <strong>Total Short (as of ${asOf}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
+                <p><strong>Book remaining:</strong> ${this.safeFormatCurrency(bookRemaining)} &nbsp;
+                   <strong>Short:</strong> ${this.safeFormatCurrency(dues.short)} &nbsp;
+                   <strong>Current:</strong> ${this.safeFormatCurrency(dues.current)} &nbsp;
+                   <strong>Total (as of ${asOf}):</strong> ${this.safeFormatCurrency(dues.total)}</p>
                 <div class="section">
                     <h4>Purchases</h4>
                     ${purchases.length ? `
@@ -1433,12 +1606,12 @@ class ReportsManager {
                 </div>
                 <div class="section">
                     <h4>Payments</h4>
-                    ${payments.length ? `
+                    ${paymentRows.length ? `
                     <div class="table-container">
                     <table class="data-table">
                         <thead><tr><th>Date</th><th>Amount</th><th>Receipt</th><th>Type</th><th>Notes</th></tr></thead>
                         <tbody>
-                            ${payments.map((p) => `
+                            ${paymentRows.map((p) => `
                                 <tr>
                                     <td>${this.safeFormatDate(p.payment_date)}</td>
                                     <td>${this.safeFormatCurrency(p.amount)}</td>
@@ -1519,19 +1692,141 @@ class ReportsManager {
         });
     }
 
+    async promptReceivableCustomers() {
+        const customers = await this.safeQuery(
+            'SELECT id, customer_name, account_no, phone FROM customers ORDER BY customer_name',
+            [],
+            []
+        );
+        if (!customers.length) {
+            this.safeShowNotification('No customers found', 'error');
+            return null;
+        }
+        if (typeof app === 'undefined' || typeof app.showModal !== 'function') {
+            this.safeShowNotification('Customer picker is unavailable', 'error');
+            return null;
+        }
+        const esc = (typeof Utils !== 'undefined' && Utils.escapeHtml) ? Utils.escapeHtml.bind(Utils) : (v) => String(v || '');
+        return await new Promise((resolve) => {
+            const html = `
+                <div class="modal">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>Select Customers</h3>
+                            <button class="modal-close" type="button">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label class="form-label">Search</label>
+                                <input type="search" id="receivable-customer-search" class="form-input" placeholder="Account or name">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Customers</label>
+                                <select id="receivable-customer-list" class="form-input" size="8"></select>
+                            </div>
+                            <div class="form-group">
+                                <button type="button" class="btn btn-sm btn-primary" id="receivable-add-btn">Add</button>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Selected</label>
+                                <div id="receivable-selected-chips"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" id="receivable-cancel-btn">Cancel</button>
+                            <button type="button" class="btn btn-secondary" id="receivable-all-btn">All customers</button>
+                            <button type="button" class="btn btn-primary" id="receivable-selected-btn">Generate selected</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            app.showModal(html);
+            let settled = false;
+            const originalClose = typeof app.closeModal === 'function' ? app.closeModal.bind(app) : () => {};
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                app.closeModal = originalClose;
+                originalClose();
+                resolve(value);
+            };
+            app.closeModal = () => finish(null);
+            const searchEl = document.getElementById('receivable-customer-search');
+            const listEl = document.getElementById('receivable-customer-list');
+            const chipsEl = document.getElementById('receivable-selected-chips');
+            const addBtn = document.getElementById('receivable-add-btn');
+            const allBtn = document.getElementById('receivable-all-btn');
+            const selectedBtn = document.getElementById('receivable-selected-btn');
+            const cancelBtn = document.getElementById('receivable-cancel-btn');
+            const selectedIds = [];
+            const customerById = new Map(customers.map((c) => [Number(c.id), c]));
+            const matches = (c, q) => {
+                if (!q) return true;
+                const name = String(c.customer_name || '').toLowerCase();
+                const acc = String(c.account_no || '').toLowerCase();
+                return name.includes(q) || acc.includes(q);
+            };
+            const renderList = () => {
+                if (!listEl) return;
+                const q = String((searchEl && searchEl.value) || '').trim().toLowerCase();
+                listEl.innerHTML = customers.filter((c) => matches(c, q)).map((c) => {
+                    const label = `${c.customer_name || 'Customer'} (${c.account_no || c.phone || c.id})`;
+                    return `<option value="${c.id}">${esc(label)}</option>`;
+                }).join('');
+            };
+            const renderChips = () => {
+                if (!chipsEl) return;
+                chipsEl.innerHTML = selectedIds.map((id) => {
+                    const c = customerById.get(id);
+                    const label = c ? `${c.customer_name || 'Customer'} (${c.account_no || c.id})` : String(id);
+                    return `<span class="status-badge">${esc(label)} <button type="button" class="btn btn-sm btn-danger" data-remove-id="${id}">Remove</button></span>`;
+                }).join('');
+            };
+            renderList();
+            renderChips();
+            if (searchEl) searchEl.addEventListener('input', renderList);
+            if (addBtn) addBtn.addEventListener('click', () => {
+                const id = listEl ? parseInt(listEl.value, 10) : NaN;
+                if (!Number.isFinite(id) || selectedIds.includes(id)) return;
+                selectedIds.push(id);
+                renderChips();
+            });
+            if (chipsEl) chipsEl.addEventListener('click', (e) => {
+                const btn = e.target && e.target.closest ? e.target.closest('[data-remove-id]') : null;
+                if (!btn) return;
+                const id = parseInt(btn.getAttribute('data-remove-id'), 10);
+                const idx = selectedIds.indexOf(id);
+                if (idx >= 0) selectedIds.splice(idx, 1);
+                renderChips();
+            });
+            if (allBtn) allBtn.addEventListener('click', () => finish({ mode: 'all' }));
+            if (selectedBtn) selectedBtn.addEventListener('click', () => {
+                if (!selectedIds.length) {
+                    this.safeShowNotification('Add customers or use All customers', 'error');
+                    return;
+                }
+                finish({ mode: 'ids', ids: selectedIds.slice() });
+            });
+            if (cancelBtn) cancelBtn.addEventListener('click', () => finish(null));
+        });
+    }
+
     async generateProfitSnapshot() {
         try {
             this.safeShowLoading();
             const range = this.getLocalRange();
             const shopName = await this.getShopName();
             const installmentProfit = await this.safeQuery(`
-                SELECT COALESCE(SUM(cp.sale_price - cp.purchase_price), 0) as profit
+                SELECT COALESCE(SUM(cp.profit_amount), 0) as profit
                 FROM customer_purchases cp
                 WHERE DATE(cp.start_date) BETWEEN DATE(?) AND DATE(?)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
             `, [range.start, range.end], [{ profit: 0 }]);
             const cashProfit = await this.safeQuery(`
-                SELECT COALESCE(SUM(cs.agreed_price - COALESCE(p.purchase_price, 0)), 0) as profit
+                SELECT COALESCE(SUM(
+                    cs.agreed_price
+                    - COALESCE(s.purchase_price, p.purchase_price) * COALESCE(s.quantity, 1)
+                ), 0) as profit
                 FROM cash_sales cs
                 JOIN stock s ON cs.stock_id = s.id
                 JOIN products p ON s.product_id = p.id
@@ -1614,14 +1909,15 @@ class ReportsManager {
         try {
             this.safeShowLoading();
             const today = this.formatDateForInput(new Date());
-            const end7 = this.formatDateForInput(new Date(Date.now() + 7 * 86400000));
             const end30 = this.formatDateForInput(new Date(Date.now() + 30 * 86400000));
+            const todayYm = String(today).slice(0, 7);
             const rows = await this.safeQuery(`
                 SELECT
                     i.id, i.installment_no, i.due_date,
                     COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) as remaining,
                     CAST(julianday(i.due_date) - julianday(?) AS INTEGER) as days_until,
                     c.customer_name, c.account_no, c.phone,
+                    c.id as customer_id,
                     COALESCE(p.item_name, '') as item_name
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
@@ -1635,50 +1931,33 @@ class ReportsManager {
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 ORDER BY i.due_date, c.customer_name
             `, [today, today, end30], []);
-            if (!rows.length) {
+            const byCustomer = new Map();
+            for (const row of rows) {
+                const dueYm = String(row.due_date || '').slice(0, 7);
+                if (dueYm < todayYm) continue;
+                const id = row.customer_id;
+                if (!byCustomer.has(id)) {
+                    byCustomer.set(id, {
+                        customer_name: row.customer_name,
+                        phone: row.phone,
+                        account_no: row.account_no,
+                        amount: 0,
+                        due_date: row.due_date,
+                        days_until: Number(row.days_until)
+                    });
+                }
+                const g = byCustomer.get(id);
+                g.amount += Number(row.remaining) || 0;
+                if (String(row.due_date) < String(g.due_date)) {
+                    g.due_date = row.due_date;
+                    g.days_until = Number(row.days_until);
+                }
+            }
+            const grouped = Array.from(byCustomer.values());
+            if (!grouped.length) {
                 this.renderReport(this.emptyReport('Upcoming Dues'));
                 return;
             }
-            const in7 = rows.filter((r) => Number(r.days_until) <= 7);
-            const table = (list) => `
-                <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Due date</th>
-                            <th>Customer</th>
-                            <th>Phone</th>
-                            <th>Account</th>
-                            <th>Item</th>
-                            <th>#</th>
-                            <th>Remaining</th>
-                            <th>Days until due</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${list.map((r) => `
-                            <tr>
-                                <td>${this.safeFormatDate(r.due_date)}</td>
-                                <td>${r.customer_name || ''}</td>
-                                <td>${r.phone || ''}</td>
-                                <td>${r.account_no || ''}</td>
-                                <td>${r.item_name || ''}</td>
-                                <td>${r.installment_no}</td>
-                                <td>${this.safeFormatCurrency(r.remaining)}</td>
-                                <td>${r.days_until}</td>
-                                <td>${this.whatsAppButton(r.phone, {
-                                    name: r.customer_name,
-                                    account: r.account_no,
-                                    amount: this.safeFormatCurrency(r.remaining),
-                                    due_date: r.due_date
-                                })}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-                </div>
-            `;
             const asOf = this.getLocalRange().end;
             const shortRows = await this.safeQuery(`
                 SELECT due_date, COALESCE(original_amount, amount) as original_amount, COALESCE(paid_amount, 0) as paid_amount
@@ -1691,10 +1970,32 @@ class ReportsManager {
                 : 0;
             const inner = `
                 <p><strong>Total Short (as of ${asOf}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
-                <h4>Next 7 days (${end7})</h4>
-                ${in7.length ? table(in7) : '<p class="text-muted">No dues in the next 7 days.</p>'}
-                <h4>Next 30 days</h4>
-                ${table(rows)}
+                <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Account</th>
+                            <th>Amount</th>
+                            <th>Next due date</th>
+                            <th>Days until</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${grouped.map((r) => `
+                            <tr>
+                                <td>${r.customer_name || ''}</td>
+                                <td>${r.phone || ''}</td>
+                                <td>${r.account_no || ''}</td>
+                                <td class="amount">${this.safeFormatCurrency(r.amount)}</td>
+                                <td>${this.safeFormatDate(r.due_date)}</td>
+                                <td>${r.days_until}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                </div>
             `;
             this.renderReport(this.wrapPanel('Upcoming Dues', `${today} to ${end30}`, inner));
         } catch (error) {
@@ -1708,18 +2009,14 @@ class ReportsManager {
     async generateDefaulterList() {
         try {
             this.safeShowLoading();
-            const today = this.formatDateForInput(new Date());
+            const asOf = this.getLocalRange().end;
             const rows = await this.safeQuery(`
                 SELECT
-                    i.id, i.installment_no, i.due_date,
-                    COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) as remaining,
-                    CAST(julianday(?) - julianday(i.due_date) AS INTEGER) as days_overdue,
+                    i.id, i.installment_no, i.due_date, i.status,
+                    COALESCE(i.original_amount, i.amount) as original_amount,
+                    COALESCE(i.paid_amount, 0) as paid_amount,
                     c.customer_name, c.account_no, c.phone, c.id as customer_id,
-                    COALESCE(p.item_name, '') as item_name,
-                    (SELECT MAX(pay.payment_date) FROM payments pay
-                        WHERE pay.customer_id = c.id
-                          AND (pay.type IS NULL OR pay.type = 'payment')
-                          AND (pay.is_deleted = 0 OR pay.is_deleted IS NULL)) as last_payment_date
+                    COALESCE(p.item_name, '') as item_name
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
                 JOIN customers c ON cp.customer_id = c.id
@@ -1729,62 +2026,111 @@ class ReportsManager {
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
-                ORDER BY days_overdue DESC, c.customer_name
-            `, [today, today], []);
-            if (!rows.length) {
+                ORDER BY i.due_date, c.customer_name
+            `, [asOf], []);
+            const lastPayRows = await this.safeQuery(`
+                SELECT customer_id, MAX(payment_date) as last_payment_date
+                FROM payments
+                WHERE (type IS NULL OR type = 'payment') AND (is_deleted = 0 OR is_deleted IS NULL)
+                GROUP BY customer_id
+            `, [], []);
+            const lastPayByCustomer = new Map();
+            for (const row of lastPayRows) {
+                lastPayByCustomer.set(row.customer_id, row.last_payment_date);
+            }
+            const grouped = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.groupCustomerDues)
+                ? InstallmentEngine.groupCustomerDues(rows, asOf)
+                : [];
+            const oldestShortDue = new Map();
+            for (const row of rows) {
+                const leftover = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
+                if (leftover <= 0) continue;
+                const dueYm = String(row.due_date || '').slice(0, 7);
+                const asOfYm = String(asOf || '').slice(0, 7);
+                if (!dueYm || !asOfYm || dueYm >= asOfYm) continue;
+                const prev = oldestShortDue.get(row.customer_id);
+                if (!prev || String(row.due_date) < String(prev)) {
+                    oldestShortDue.set(row.customer_id, row.due_date);
+                }
+            }
+            const defaulters = grouped.filter((g) => g.short > 0).map((g) => {
+                const oldest = oldestShortDue.get(g.customer_id) || g.due_date;
+                const days = this.daysBetween(oldest, asOf);
+                return {
+                    customer_name: g.customer_name,
+                    phone: g.phone,
+                    account_no: g.account_no,
+                    short: g.short,
+                    last_payment_date: lastPayByCustomer.get(g.customer_id) || null,
+                    days_since: days,
+                    due_date: oldest
+                };
+            });
+            if (!defaulters.length) {
                 this.renderReport(this.emptyReport('Defaulter List'));
                 return;
             }
-            const totalShort = rows.reduce((sum, r) => sum + (Number(r.remaining) || 0), 0);
+            const totalShort = defaulters.reduce((sum, r) => sum + (Number(r.short) || 0), 0);
             const inner = `
-                <p><strong>Total Short (as of ${today}):</strong> ${this.safeFormatCurrency(totalShort)}</p>
                 <div class="table-container">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Customer</th>
+                            <th>Name</th>
                             <th>Phone</th>
                             <th>Account</th>
-                            <th>Item</th>
-                            <th>#</th>
-                            <th>Due date</th>
-                            <th>Days overdue</th>
-                            <th>Remaining</th>
+                            <th>Short</th>
                             <th>Last payment</th>
-                            <th></th>
+                            <th>Days since oldest short due</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows.map((r) => `
+                        ${defaulters.map((r) => `
                             <tr>
                                 <td>${r.customer_name || ''}</td>
                                 <td>${r.phone || ''}</td>
                                 <td>${r.account_no || ''}</td>
-                                <td>${r.item_name || ''}</td>
-                                <td>${r.installment_no}</td>
-                                <td>${this.safeFormatDate(r.due_date)}</td>
-                                <td>${r.days_overdue}</td>
-                                <td>${this.safeFormatCurrency(r.remaining)}</td>
-                                <td>${r.last_payment_date ? this.safeFormatDate(r.last_payment_date) : '-'}</td>
-                                <td>${this.whatsAppButton(r.phone, {
+                                <td class="amount">${this.safeFormatCurrency(r.short)} ${this.whatsAppButton(r.phone, {
                                     name: r.customer_name,
                                     account: r.account_no,
-                                    amount: this.safeFormatCurrency(r.remaining),
+                                    amount: this.safeFormatCurrency(r.short),
                                     due_date: r.due_date
                                 })}</td>
+                                <td>${r.last_payment_date ? this.safeFormatDate(r.last_payment_date) : '-'}</td>
+                                <td>${r.days_since}</td>
                             </tr>
                         `).join('')}
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="3"><strong>Total Short</strong></td>
+                            <td class="amount"><strong>${this.safeFormatCurrency(totalShort)}</strong></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
                 </table>
                 </div>
             `;
-            this.renderReport(this.wrapPanel('Defaulter List', today, inner));
+            this.renderReport(this.wrapPanel('Defaulter List', `As of ${asOf}`, inner));
         } catch (error) {
             console.error(error);
             this.safeShowNotification('Failed to generate defaulter list', 'error');
         } finally {
             this.safeHideLoading();
         }
+    }
+
+    daysBetween(fromDate, toDate) {
+        const parse = (value) => {
+            const parts = String(value || '').split('-');
+            if (parts.length < 3) return null;
+            return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        };
+        const from = parse(fromDate);
+        const to = parse(toDate);
+        if (!from || !to) return 0;
+        return Math.round((to.getTime() - from.getTime()) / 86400000);
     }
 
     async generateSupplierLedger() {
@@ -1799,7 +2145,7 @@ class ReportsManager {
             const sections = [];
             for (const supplier of suppliers) {
                 const purchases = await this.safeQuery(`
-                    SELECT s.stock_date as entry_date, COALESCE(pr.purchase_price, 0) as amount,
+                    SELECT s.stock_date as entry_date, COALESCE(s.purchase_price, pr.purchase_price) * COALESCE(s.quantity, 1) as amount,
                            'Purchase' as particular, COALESCE(pr.item_name, s.stock_no) as detail
                     FROM stock s
                     JOIN products pr ON s.product_id = pr.id
@@ -1815,7 +2161,7 @@ class ReportsManager {
                     ORDER BY payment_date
                 `, [supplier.id, range.start, range.end], []);
                 const openingPurchases = await this.safeQuery(`
-                    SELECT COALESCE(SUM(pr.purchase_price), 0) as total
+                    SELECT COALESCE(SUM(COALESCE(s.purchase_price, pr.purchase_price) * COALESCE(s.quantity, 1)), 0) as total
                     FROM stock s JOIN products pr ON s.product_id = pr.id
                     WHERE s.supplier_id = ? AND DATE(s.stock_date) < DATE(?)
                 `, [supplier.id, range.start], [{ total: 0 }]);
@@ -1920,6 +2266,17 @@ class ReportsManager {
                             </tr>`;
                         }).join('')}
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="7"><strong>Total remaining</strong></td>
+                            <td><strong>${this.safeFormatCurrency(rows.reduce((s, r) => {
+                                const original = Number(r.original_sum) || Number(r.total_amount) || 0;
+                                const paid = Number(r.paid_sum) || 0;
+                                return s + Math.max(0, original - paid);
+                            }, 0))}</strong></td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
                 </table>
                 </div>
             `;
@@ -1939,7 +2296,9 @@ class ReportsManager {
             const installmentSales = await this.safeQuery(`
                 SELECT cp.start_date as sale_date, COALESCE(p.item_name, '') as item_name,
                        'Installment' as sale_type, COALESCE(cp.advance_received, 0) as advance,
-                       MAX(0, COALESCE(cp.total_amount, 0) - COALESCE(cp.advance_received, 0)) as remaining_after_advance,
+                       (SELECT MAX(0, COALESCE(SUM(COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)), 0))
+                        FROM installments i
+                        WHERE i.purchase_id = cp.id AND (i.is_deleted = 0 OR i.is_deleted IS NULL)) as book_remaining,
                        COALESCE(cp.profit_amount, 0) as profit
                 FROM customer_purchases cp
                 LEFT JOIN stock s ON cp.stock_id = s.id
@@ -1951,8 +2310,8 @@ class ReportsManager {
             const cashSales = await this.safeQuery(`
                 SELECT cs.sale_date, COALESCE(p.item_name, '') as item_name,
                        'Cash' as sale_type, COALESCE(cs.received_price, 0) as advance,
-                       COALESCE(cs.due_amount, 0) as remaining_after_advance,
-                       COALESCE(cs.agreed_price, 0) - COALESCE(p.purchase_price, 0) as profit
+                       COALESCE(cs.due_amount, 0) as book_remaining,
+                       COALESCE(cs.agreed_price, 0) - COALESCE(s.purchase_price, p.purchase_price, 0) * COALESCE(s.quantity, 1) as profit
                 FROM cash_sales cs
                 JOIN stock s ON cs.stock_id = s.id
                 JOIN products p ON s.product_id = p.id
@@ -1984,7 +2343,7 @@ class ReportsManager {
                     <thead>
                         <tr>
                             <th>Date</th><th>Item</th><th>Type</th>
-                            <th>Advance</th><th>Remaining after advance</th><th>Profit</th>
+                            <th>Advance</th><th>Book remaining</th><th>Profit</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1994,7 +2353,7 @@ class ReportsManager {
                                 <td>${r.item_name || ''}</td>
                                 <td>${r.sale_type}</td>
                                 <td>${this.safeFormatCurrency(r.advance)}</td>
-                                <td>${this.safeFormatCurrency(r.remaining_after_advance)}</td>
+                                <td>${this.safeFormatCurrency(r.book_remaining)}</td>
                                 <td>${this.safeFormatCurrency(r.profit)}</td>
                             </tr>
                         `).join('') || '<tr><td colspan="6">No sales</td></tr>'}
@@ -2003,7 +2362,7 @@ class ReportsManager {
                         <tr>
                             <td colspan="3"><strong>Total</strong></td>
                             <td><strong>${this.safeFormatCurrency(sumCol(sales, 'advance'))}</strong></td>
-                            <td><strong>${this.safeFormatCurrency(sumCol(sales, 'remaining_after_advance'))}</strong></td>
+                            <td><strong>${this.safeFormatCurrency(sumCol(sales, 'book_remaining'))}</strong></td>
                             <td><strong>${this.safeFormatCurrency(sumCol(sales, 'profit'))}</strong></td>
                         </tr>
                     </tfoot>
@@ -2069,7 +2428,6 @@ class ReportsManager {
 
     // Cleanup method to ensure no temporary data persists
     cleanupTempData() {
-        this.tempDateRange = null;
         this.currentReportData = null;
         this.currentTemplateType = null;
         this.dateRangeResolver = null;

@@ -99,8 +99,8 @@ class Database {
 
     static async addStock(stock) {
         return await this.run(
-            'INSERT INTO stock (product_id, supplier_id, engine_no, chassis_no, stock_date, stock_no, imei, reg_no, serial_no, quantity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [stock.product_id, stock.supplier_id, stock.engine_no || null, stock.chassis_no || null, stock.stock_date, stock.stock_no, stock.imei || null, stock.reg_no || null, stock.serial_no || null, stock.quantity != null ? stock.quantity : 1]
+            'INSERT INTO stock (product_id, supplier_id, engine_no, chassis_no, stock_date, stock_no, imei, reg_no, serial_no, quantity, purchase_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [stock.product_id, stock.supplier_id, stock.engine_no || null, stock.chassis_no || null, stock.stock_date, stock.stock_no, stock.imei || null, stock.reg_no || null, stock.serial_no || null, stock.quantity != null ? stock.quantity : 1, stock.purchase_price != null ? stock.purchase_price : null]
         );
     }
 
@@ -694,39 +694,52 @@ class Database {
                 ? Utils.toLocalDateString(new Date())
                 : null;
 
-            const pendingInstallments = await this.get(`
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
-                        THEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0)
-                        ELSE 0
-                    END
-                ), 0) as pending
-                FROM installments
-                WHERE (is_deleted = 0 OR is_deleted IS NULL)
-            `);
+            const asOf = today || new Date().toISOString().slice(0, 10);
             const pendingCash = await this.get(`
                 SELECT COALESCE(SUM(due_amount), 0) as pending
                 FROM cash_sales
                 WHERE due_amount > 0
             `);
-            stats.pendingAmount = (pendingInstallments?.pending || 0) + (pendingCash?.pending || 0);
+            let installmentPending = 0;
+            let overdueCustomers = 0;
+            if (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.groupCustomerDues) {
+                const instRows = await this.query(`
+                    SELECT i.due_date, COALESCE(i.original_amount, i.amount) as original_amount,
+                           COALESCE(i.paid_amount, 0) as paid_amount, i.status, cp.customer_id
+                    FROM installments i
+                    JOIN customer_purchases cp ON i.purchase_id = cp.id
+                    WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                      AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+                `);
+                const grouped = InstallmentEngine.groupCustomerDues(instRows || [], asOf);
+                installmentPending = grouped.reduce((s, g) => s + (Number(g.total) || 0), 0);
+                overdueCustomers = grouped.filter((g) => g.short > 0).length;
+            } else {
+                const pendingInstallments = await this.get(`
+                    SELECT COALESCE(SUM(
+                        CASE
+                            WHEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
+                            THEN COALESCE(original_amount, amount) - COALESCE(paid_amount, 0)
+                            ELSE 0
+                        END
+                    ), 0) as pending
+                    FROM installments
+                    WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                `);
+                installmentPending = pendingInstallments?.pending || 0;
+                const overdueResult = await this.get(`
+                    SELECT COUNT(*) as count
+                    FROM installments
+                    WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', ?)
+                      AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                `, [asOf]);
+                overdueCustomers = overdueResult?.count || 0;
+            }
+            stats.pendingAmount = installmentPending + (pendingCash?.pending || 0);
+            stats.overdueInstallments = overdueCustomers;
 
-            const overdueSql = today
-                ? `SELECT COUNT(*) as count
-                   FROM installments
-                   WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', ?)
-                     AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
-                     AND (is_deleted = 0 OR is_deleted IS NULL)`
-                : `SELECT COUNT(*) as count
-                   FROM installments
-                   WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', date('now'))
-                     AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
-                     AND (is_deleted = 0 OR is_deleted IS NULL)`;
-            const overdueResult = await this.get(overdueSql, today ? [today] : []);
-            stats.overdueInstallments = overdueResult?.count || 0;
-
-            const monthPrefix = today ? today.slice(0, 7) : null;
+            const monthPrefix = String(asOf).slice(0, 7);
             const monthlyCollectionResult = await this.get(`
                 SELECT COALESCE(SUM(amount), 0) as total FROM (
                     SELECT amount
@@ -739,8 +752,14 @@ class Database {
                     FROM cash_sales
                     WHERE received_price > 0
                       AND strftime('%Y-%m', sale_date) = ?
+                    UNION ALL
+                    SELECT advance_received as amount
+                    FROM customer_purchases
+                    WHERE COALESCE(advance_received, 0) > 0
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                      AND strftime('%Y-%m', start_date) = ?
                 ) collection_rows
-            `, [monthPrefix || '', monthPrefix || '']);
+            `, [monthPrefix, monthPrefix, monthPrefix]);
             stats.monthlyCollection = monthlyCollectionResult?.total || 0;
 
             // Active installment customers
@@ -752,12 +771,36 @@ class Database {
             `);
             stats.activeCustomers = activeCustomersResult?.count || 0;
 
-            // Total profit earned
-            const profitResult = await this.get(`
-                SELECT SUM(profit_amount) as total
+            // Profit this month: current-month Profit Snapshot net
+            const instProfit = await this.get(`
+                SELECT COALESCE(SUM(profit_amount), 0) as total
                 FROM customer_purchases
-            `);
-            stats.totalProfit = profitResult?.total || 0;
+                WHERE (is_deleted = 0 OR is_deleted IS NULL)
+                  AND strftime('%Y-%m', start_date) = ?
+            `, [monthPrefix]);
+            const cashProfit = await this.get(`
+                SELECT COALESCE(SUM(
+                    cs.agreed_price
+                    - COALESCE(s.purchase_price, p.purchase_price) * COALESCE(s.quantity, 1)
+                ), 0) as total
+                FROM cash_sales cs
+                JOIN stock s ON cs.stock_id = s.id
+                JOIN products p ON s.product_id = p.id
+                WHERE strftime('%Y-%m', cs.sale_date) = ?
+            `, [monthPrefix]);
+            const monthDiscounts = await this.get(`
+                SELECT COALESCE(SUM(d.amount), 0) as total
+                FROM discounts d
+                JOIN customer_purchases cp ON d.purchase_id = cp.id
+                WHERE strftime('%Y-%m', cp.start_date) = ?
+            `, [monthPrefix]);
+            const monthExpenses = await this.get(`
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM expenses
+                WHERE strftime('%Y-%m', date) = ?
+            `, [monthPrefix]);
+            stats.totalProfit = (instProfit?.total || 0) + (cashProfit?.total || 0)
+                - (monthDiscounts?.total || 0) - (monthExpenses?.total || 0);
 
             return stats;
         } catch (error) {
@@ -1199,7 +1242,7 @@ class Database {
             LEFT JOIN (
                 SELECT 
                     st.supplier_id,
-                    SUM(p.purchase_price) AS balance
+                    SUM(COALESCE(st.purchase_price, p.purchase_price) * COALESCE(st.quantity, 1)) AS balance
                 FROM stock st
                 JOIN products p ON st.product_id = p.id
                 GROUP BY st.supplier_id
@@ -1307,9 +1350,12 @@ class Database {
         if (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.groupCustomerDues) {
             return InstallmentEngine.groupCustomerDues(rows || [], today).map((g) => ({
                 ...g,
-                remaining_amount: g.amount,
-                days_overdue: g.kind === 'short' ? 1 : 0,
-                item_name: g.kind === 'short' ? 'Short' : 'Current installment'
+                remaining_amount: g.total,
+                short: g.short,
+                current: g.current,
+                amount: g.total,
+                days_overdue: g.short > 0 ? 1 : 0,
+                item_name: g.kind === 'both' ? 'Short + current' : (g.kind === 'short' ? 'Short' : 'Current installment')
             }));
         }
         return rows || [];

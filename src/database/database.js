@@ -338,6 +338,10 @@ class DatabaseManager {
         await this.run('ALTER TABLE stock ADD COLUMN quantity INTEGER DEFAULT 1');
         console.log('Migration applied: stock.quantity');
       }
+      if (!(await this.columnExists('stock', 'purchase_price'))) {
+        await this.run('ALTER TABLE stock ADD COLUMN purchase_price REAL');
+        console.log('Migration applied: stock.purchase_price');
+      }
       await this.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_imei ON stock(imei) WHERE imei IS NOT NULL');
       await this.makeStockIdentifiersNullable();
 
@@ -456,6 +460,7 @@ class DatabaseManager {
           reg_no TEXT,
           serial_no TEXT,
           quantity INTEGER DEFAULT 1,
+          purchase_price REAL,
           FOREIGN KEY (product_id) REFERENCES products (id),
           FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
         )

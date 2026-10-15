@@ -173,31 +173,31 @@ class DuesRemindersManager {
                             <th>Customer</th>
                             <th>Account No</th>
                             <th>Phone</th>
-                             <th>Type</th>
-                             <th>Due Date</th>
-                             <th>Amount Due</th>
-                             <th>Actions</th>
-                         </tr>
-                     </thead>
-                     <tbody>
-                         ${this.installmentDues.map(due => `
-                             <tr class="stagger-item ${due.kind === 'short' ? 'row-overdue' : ''}">
-                                 <td><strong>${due.customer_name || 'N/A'}</strong></td>
-                                 <td>${due.account_no}</td>
-                                 <td>${due.phone}</td>
-                                 <td>${due.kind === 'short' ? 'Short' : 'Current'}</td>
-                                 <td>${Utils.formatDate(due.due_date)}</td>
-                                 <td><strong>${Utils.formatCurrency(due.remaining_amount || due.amount)}</strong></td>
-                                 <td>
-                                     <div class="action-buttons">
-                                         ${this.whatsAppLink(due)}
-                                         <button class="btn btn-sm btn-primary" onclick="app.duesReminders.viewInstallmentDetails(${due.customer_id})">
-                                             <i class="fas fa-eye"></i> View
-                                         </button>
-                                     </div>
-                                 </td>
-                             </tr>
-                         `).join('')}
+                            <th>Short</th>
+                            <th>Current</th>
+                            <th>Total</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${this.installmentDues.map(due => `
+                            <tr class="stagger-item ${due.short > 0 ? 'row-overdue' : ''}">
+                                <td><strong>${due.customer_name || 'N/A'}</strong></td>
+                                <td>${due.account_no}</td>
+                                <td>${due.phone}</td>
+                                <td>${Utils.formatCurrency(due.short || 0)}</td>
+                                <td>${Utils.formatCurrency(due.current || 0)}</td>
+                                <td><strong>${Utils.formatCurrency(due.total || due.remaining_amount)}</strong></td>
+                                <td>
+                                    <div class="action-buttons">
+                                        ${this.whatsAppLink(due)}
+                                        <button class="btn btn-sm btn-primary" onclick="app.duesReminders.viewInstallmentDetails(${due.customer_id})">
+                                            <i class="fas fa-eye"></i> View
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
                     </tbody>
                 </table>
             </div>
