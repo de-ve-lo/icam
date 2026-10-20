@@ -159,6 +159,31 @@ class ReportsManager {
         return `<div class="card"><div class="card-body"><h3>${title}</h3><p class="text-muted">No data for this period</p></div></div>`;
     }
 
+    printCurrent() {
+        const panel = document.getElementById('report-print-area');
+        if (!panel) {
+            this.safeShowNotification('No report to print', 'warning');
+            return;
+        }
+        const clone = panel.cloneNode(true);
+        clone.querySelectorAll('.print-btn').forEach((btn) => btn.remove());
+        const titleEl = clone.querySelector('h3');
+        const title = titleEl ? titleEl.textContent.trim() : 'Report';
+        const extraCss = `
+            .report-shop-logo { max-height: 64px; max-width: 160px; display: block; margin: 0 auto 8px; }
+            .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }
+            .summary-card { border: 1px solid #ddd; padding: 10px; text-align: center; }
+            .table-container { overflow: visible; }
+            h2, h3 { text-align: center; }
+        `;
+        const html = (typeof Utils !== 'undefined' && Utils.wrapPrintDocument)
+            ? Utils.wrapPrintDocument(clone.innerHTML, title, extraCss)
+            : clone.innerHTML;
+        if (typeof Utils !== 'undefined' && Utils.showPrintPreview) {
+            Utils.showPrintPreview(html, title);
+        }
+    }
+
     wrapPanel(title, period, inner, shopName) {
         const settings = this._shopSettings || {};
         const esc = (typeof Utils !== 'undefined' && Utils.escapeHtml) ? Utils.escapeHtml.bind(Utils) : (v) => String(v || '');
@@ -171,7 +196,7 @@ class ReportsManager {
             : '';
         const contact = [phone, address].filter(Boolean).join(' | ');
         return `<div class="report-panel" id="report-print-area">
-            <button type="button" class="btn btn-secondary print-btn" onclick="window.print()">Print Report</button>
+            <button type="button" class="btn btn-secondary print-btn" onclick="app.reports.printCurrent()">Print / Save PDF</button>
             <div class="shop-print-header">
                 ${logo}
                 <h2>${name}</h2>
@@ -311,15 +336,16 @@ class ReportsManager {
                 GROUP BY cp.customer_id
             `, [range.start, range.end], []);
             const cashSales = await this.safeQuery(`
-                SELECT cs.customer_id,
+                SELECT csc.customer_id,
                        COALESCE(c.account_no, 'N/A') as account_no,
                        COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
-                       COALESCE(SUM(cs.received_price), 0) as total
-                FROM cash_sales cs
-                LEFT JOIN customers c ON c.id = cs.customer_id
-                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
-                  AND cs.received_price > 0
-                GROUP BY cs.customer_id
+                       COALESCE(SUM(csc.amount), 0) as total
+                FROM cash_sale_collections csc
+                LEFT JOIN customers c ON csc.customer_id = c.id
+                WHERE DATE(csc.collection_date) BETWEEN DATE(?) AND DATE(?)
+                  AND csc.amount > 0
+                  AND (csc.is_deleted = 0 OR csc.is_deleted IS NULL)
+                GROUP BY csc.customer_id
             `, [range.start, range.end], []);
             const byCustomer = new Map();
             const keyFor = (id) => (id == null ? 'walkin' : String(id));
@@ -525,11 +551,12 @@ class ReportsManager {
             const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
             const cashSaleCollections = await this.safeQuery(`
                 SELECT
-                    COALESCE(SUM(received_price), 0) as total_amount,
+                    COALESCE(SUM(amount), 0) as total_amount,
                     COUNT(*) as transaction_count
-                FROM cash_sales
-                WHERE DATE(sale_date) BETWEEN DATE(?) AND DATE(?)
-                  AND received_price > 0
+                FROM cash_sale_collections
+                WHERE DATE(collection_date) BETWEEN DATE(?) AND DATE(?)
+                  AND amount > 0
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
             `, [range.start, range.end], [{ total_amount: 0, transaction_count: 0 }]);
             const advances = await this.safeQuery(`
                 SELECT
@@ -1327,13 +1354,14 @@ class ReportsManager {
             const payments = await this.loadCollectionFromPayments(range.start, range.end);
             const cashCollected = ReportsManager.sumPaymentsInRange(payments, range.start, range.end);
             const cashSales = await this.safeQuery(`
-                SELECT sale_date as entry_date, received_price as amount, 'Cash Sale' as source,
+                SELECT csc.collection_date as entry_date, csc.amount, 'Cash Sale' as source,
                        COALESCE(c.customer_name, 'Walk-in Customer') as party
-                FROM cash_sales cs
-                LEFT JOIN customers c ON cs.customer_id = c.id
-                WHERE DATE(cs.sale_date) BETWEEN DATE(?) AND DATE(?)
-                  AND received_price > 0
-                ORDER BY cs.sale_date
+                FROM cash_sale_collections csc
+                LEFT JOIN customers c ON csc.customer_id = c.id
+                WHERE DATE(csc.collection_date) BETWEEN DATE(?) AND DATE(?)
+                  AND csc.amount > 0
+                  AND (csc.is_deleted = 0 OR csc.is_deleted IS NULL)
+                ORDER BY csc.collection_date
             `, [range.start, range.end], []);
             const advances = await this.safeQuery(`
                 SELECT cp.start_date as entry_date, cp.advance_received as amount, 'Advance' as source,

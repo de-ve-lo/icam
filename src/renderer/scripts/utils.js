@@ -53,6 +53,15 @@ class Utils {
         const secondDate = new Date(date2);
         return Math.round((secondDate - firstDate) / oneDay);
     }
+
+    static localDaysBetween(fromDate, toDate) {
+        const parse = (value) => {
+            const parts = String(value || '').slice(0, 10).split('-').map(Number);
+            return new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+        };
+        const ms = parse(toDate) - parse(fromDate);
+        return Math.round(ms / (24 * 60 * 60 * 1000));
+    }
     
     // Currency formatting
     static formatCurrency(amount, currency = 'PKR') {
@@ -322,36 +331,135 @@ class Utils {
         return `<div class="shop-print-header">${logo}<h1>${name}</h1>${lines ? `<p>${lines}</p>` : ''}</div>`;
     }
 
-    // Print utilities
+    static wrapPrintDocument(bodyHtml, title = 'Print Document', extraCss = '') {
+        const safeTitle = Utils.escapeHtml(title);
+        return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>${safeTitle}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        ${Utils.developerCreditCss()}
+        ${Utils.shopPrintHeaderCss()}
+        ${extraCss}
+        @media print { body { margin: 0; } .no-print { display: none; } }
+    </style>
+</head>
+<body>
+${bodyHtml}
+</body>
+</html>`;
+    }
+
+    static pdfFileName(title) {
+        const stamp = Utils.toLocalDateString(new Date());
+        const slug = String(title || 'document').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 60);
+        return `${slug || 'document'}-${stamp}.pdf`;
+    }
+
+    static async sendPrint(html) {
+        if (!window.electronAPI || !window.electronAPI.invoke) {
+            throw new Error('Print is only available in the desktop app');
+        }
+        return window.electronAPI.invoke('print-document', { html });
+    }
+
+    static async savePrintPdf(html, title) {
+        if (!window.electronAPI || !window.electronAPI.invoke) {
+            throw new Error('Save PDF is only available in the desktop app');
+        }
+        return window.electronAPI.invoke('print-preview-pdf', {
+            html,
+            defaultName: Utils.pdfFileName(title)
+        });
+    }
+
+    static showPrintPreview(html, title = 'Print Preview') {
+        const safeTitle = Utils.escapeHtml(title);
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const modalHtml = `
+            <div class="modal print-preview-modal">
+                <div class="modal-content modal-xl print-preview-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-print"></i> ${safeTitle}</h3>
+                        <button class="modal-close" type="button">&times;</button>
+                    </div>
+                    <div class="modal-body print-preview-body">
+                        <iframe class="print-preview-frame" src="${url}" title="${safeTitle}"></iframe>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" type="button" id="print-preview-close">Close</button>
+                        <button class="btn btn-secondary" type="button" id="print-preview-pdf">
+                            <i class="fas fa-file-pdf"></i> Save PDF
+                        </button>
+                        <button class="btn btn-primary" type="button" id="print-preview-print">
+                            <i class="fas fa-print"></i> Print
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        if (typeof app !== 'undefined' && app.showModal) {
+            app.showModal(modalHtml);
+        } else {
+            const container = document.getElementById('modal-container');
+            if (container) container.innerHTML = modalHtml;
+        }
+        const revoke = () => URL.revokeObjectURL(url);
+        const notify = (message, type) => {
+            if (typeof app !== 'undefined' && app.showNotification) {
+                app.showNotification(message, type);
+            }
+        };
+        const closeBtn = document.getElementById('print-preview-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                revoke();
+                if (typeof app !== 'undefined' && app.closeModal) app.closeModal();
+            });
+        }
+        const printBtn = document.getElementById('print-preview-print');
+        if (printBtn) {
+            printBtn.addEventListener('click', async () => {
+                try {
+                    const result = await Utils.sendPrint(html);
+                    if (result && result.ok === false && result.reason !== 'canceled') {
+                        notify('Print failed', 'error');
+                    }
+                } catch (error) {
+                    notify(error.message || 'Print failed', 'error');
+                }
+            });
+        }
+        const pdfBtn = document.getElementById('print-preview-pdf');
+        if (pdfBtn) {
+            pdfBtn.addEventListener('click', async () => {
+                try {
+                    const result = await Utils.savePrintPdf(html, title);
+                    if (result && result.ok) {
+                        notify('PDF saved', 'success');
+                    } else if (result && result.reason && result.reason !== 'canceled') {
+                        notify('Failed to save PDF', 'error');
+                    }
+                } catch (error) {
+                    notify(error.message || 'Failed to save PDF', 'error');
+                }
+            });
+        }
+        const modalClose = document.querySelector('#modal-container .modal-close');
+        if (modalClose) modalClose.addEventListener('click', revoke, { once: true });
+    }
+
     static printElement(elementId, title = 'Print Document') {
         const element = document.getElementById(elementId);
         if (!element) return;
-        
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>${title}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    table { width: 100%; border-collapse: collapse; }
-                    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                    th { background-color: #f2f2f2; }
-                    .developer-credit { margin-top: 24px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #ddd; padding-top: 12px; }
-                    @media print {
-                        body { margin: 0; }
-                    }
-                </style>
-            </head>
-            <body>
-                ${element.innerHTML}
-                ${Utils.developerCreditHtml()}
-            </body>
-            </html>
-        `);
-        printWindow.document.close();
-        printWindow.print();
+        const html = Utils.wrapPrintDocument(`${element.innerHTML}${Utils.developerCreditHtml()}`, title);
+        Utils.showPrintPreview(html, title);
     }
     
     // Performance utilities

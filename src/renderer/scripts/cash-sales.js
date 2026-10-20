@@ -230,52 +230,29 @@ class CashSalesManager {
                 return;
             }
 
-            const win = window.open('', '_blank');
             const shopHeader = await Utils.shopPrintHeaderHtml();
-            const html = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Cash Sale Invoice - ${sale.id}</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        h2 { margin-bottom: 20px; text-align: center; }
-                        .invoice-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                        .invoice-details { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                        .invoice-details td, .invoice-details th { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                        .invoice-details th { background: #f5f5f5; font-weight: bold; }
-                        .total-row { background: #e8f4f8; font-weight: bold; }
-                        .print-thanks { text-align: center; margin-top: 40px; font-size: 12px; }
-                        ${Utils.developerCreditCss()}
-                        ${Utils.shopPrintHeaderCss()}
-                    </style>
-                </head>
-                <body>
-                    ${shopHeader}
-                    <h2>CASH SALE INVOICE</h2>
-                    <div class="invoice-header">
-                        <div><strong>Invoice #:</strong> CS-${sale.id.toString().padStart(6, '0')}</div>
-                        <div><strong>Date:</strong> ${Utils.formatDate(sale.sale_date, 'readable')}</div>
-                    </div>
-                    <table class="invoice-details">
-                        <tr><th>Customer</th><td>${sale.customer_name || 'Walk-in Customer'}</td></tr>
-                        <tr><th>Item</th><td>${sale.item_name}</td></tr>
-                        <tr><th>${Utils.stockIdentifier(sale).label}</th><td>${Utils.stockIdentifier(sale).value}</td></tr>
-                        <tr><th>Agreed Price</th><td>${Utils.formatCurrency(sale.agreed_price)}</td></tr>
-                        <tr><th>Amount Received</th><td>${Utils.formatCurrency(sale.received_price)}</td></tr>
-                        ${sale.due_amount > 0 ? `<tr><th style="color: red;">Due Amount</th><td style="color: red;">${Utils.formatCurrency(sale.due_amount)}</td></tr>` : ''}
-                        <tr class="total-row"><th>Status</th><td>${Utils.capitalizeWords(sale.payment_status)}</td></tr>
-                    </table>
-                    ${sale.notes ? `<p><strong>Notes:</strong> ${sale.notes}</p>` : ''}
-                    <p class="print-thanks">Thank you for your business!</p>
-                    ${Utils.developerCreditHtml()}
-                </body>
-                </html>
+            const body = `
+                ${shopHeader}
+                <h2 style="text-align:center;margin-bottom:20px;">CASH SALE INVOICE</h2>
+                <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
+                    <div><strong>Invoice #:</strong> CS-${sale.id.toString().padStart(6, '0')}</div>
+                    <div><strong>Date:</strong> ${Utils.formatDate(sale.sale_date, 'readable')}</div>
+                </div>
+                <table>
+                    <tr><th>Customer</th><td>${sale.customer_name || 'Walk-in Customer'}</td></tr>
+                    <tr><th>Item</th><td>${sale.item_name}</td></tr>
+                    <tr><th>${Utils.stockIdentifier(sale).label}</th><td>${Utils.stockIdentifier(sale).value}</td></tr>
+                    <tr><th>Agreed Price</th><td>${Utils.formatCurrency(sale.agreed_price)}</td></tr>
+                    <tr><th>Amount Received</th><td>${Utils.formatCurrency(sale.received_price)}</td></tr>
+                    ${sale.due_amount > 0 ? `<tr><th style="color: red;">Due Amount</th><td style="color: red;">${Utils.formatCurrency(sale.due_amount)}</td></tr>` : ''}
+                    <tr><th>Status</th><td>${Utils.capitalizeWords(sale.payment_status)}</td></tr>
+                </table>
+                ${sale.notes ? `<p><strong>Notes:</strong> ${sale.notes}</p>` : ''}
+                <p style="text-align:center;margin-top:40px;font-size:12px;">Thank you for your business!</p>
+                ${Utils.developerCreditHtml()}
             `;
-            win.document.write(html);
-            win.document.close();
-            win.focus();
-            setTimeout(() => win.print(), 300);
+            const html = Utils.wrapPrintDocument(body, `Cash Sale Invoice - ${sale.id}`);
+            Utils.showPrintPreview(html, `Cash Sale Invoice - ${sale.id}`);
         } catch (error) {
             console.error('Error printing invoice:', error);
             app.showNotification('Failed to print invoice', 'error');
@@ -309,7 +286,7 @@ class CashSalesManager {
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Collection Date</label>
-                                <input type="date" name="collection_date" class="form-input" value="${new Date().toISOString().split('T')[0]}">
+                                <input type="date" name="collection_date" class="form-input" value="${Utils.toLocalDateString(new Date())}">
                             </div>
                         </form>
                     </div>
@@ -335,7 +312,7 @@ class CashSalesManager {
 
         try {
             app.showLoading();
-            await Database.collectCashSaleDues(cashSaleId, amount);
+            await Database.collectCashSaleDues(cashSaleId, amount, formData.get('collection_date'));
             app.showNotification('Dues collected successfully', 'success');
             app.closeModal();
             await this.loadData(); // Refresh the list

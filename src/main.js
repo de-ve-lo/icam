@@ -520,6 +520,73 @@ ipcMain.handle('customer-photo-url', async (event, filePath) => {
   }
 });
 
+async function loadPrintWindow(html) {
+  const tmp = path.join(app.getPath('temp'), `print-${Date.now()}-${Math.random().toString(16).slice(2)}.html`);
+  fs.writeFileSync(tmp, html, 'utf8');
+  const win = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 700,
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  await win.loadFile(tmp);
+  return { win, tmp };
+}
+
+function cleanupPrintWindow(win, tmp) {
+  try { if (win && !win.isDestroyed()) win.destroy(); } catch (_) { /* ignore */ }
+  try { if (tmp && fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+}
+
+ipcMain.handle('print-document', async (event, { html } = {}) => {
+  if (!html) return { ok: false, reason: 'missing' };
+  let win;
+  let tmp;
+  try {
+    ({ win, tmp } = await loadPrintWindow(html));
+    await new Promise((resolve) => {
+      win.webContents.print({ silent: false, printBackground: true }, () => resolve());
+    });
+    return { ok: true };
+  } catch (error) {
+    console.error('Print error:', error);
+    return { ok: false, reason: error.message };
+  } finally {
+    cleanupPrintWindow(win, tmp);
+  }
+});
+
+ipcMain.handle('print-preview-pdf', async (event, { html, defaultName } = {}) => {
+  if (!html || !mainWindow) return { ok: false, reason: 'missing' };
+  let win;
+  let tmp;
+  try {
+    ({ win, tmp } = await loadPrintWindow(html));
+    const data = await win.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'A4',
+      margins: { marginType: 'default' }
+    });
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save PDF',
+      defaultPath: defaultName || 'document.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
+    if (result.canceled || !result.filePath) return { ok: false, reason: 'canceled' };
+    fs.writeFileSync(result.filePath, data);
+    return { ok: true, path: result.filePath };
+  } catch (error) {
+    console.error('Save PDF error:', error);
+    return { ok: false, reason: error.message };
+  } finally {
+    cleanupPrintWindow(win, tmp);
+  }
+});
+
 ipcMain.handle('app-quit-now', async () => {
   if (mainWindow) mainWindow._allowQuit = true;
   app.quit();

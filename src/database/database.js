@@ -261,6 +261,20 @@ class DatabaseManager {
         FOREIGN KEY (stock_id) REFERENCES stock(id)
       )`);
 
+      // Dated cash-sale collections. received_price stays as the running total.
+      await this.run(`CREATE TABLE IF NOT EXISTS cash_sale_collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cash_sale_id INTEGER NOT NULL,
+        customer_id INTEGER,
+        amount REAL NOT NULL,
+        collection_date DATE NOT NULL,
+        receipt_no TEXT,
+        notes TEXT,
+        is_deleted INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cash_sale_id) REFERENCES cash_sales(id)
+      )`);
+
       // Create supplier_payments table if missing
       await this.run(`CREATE TABLE IF NOT EXISTS supplier_payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,6 +358,20 @@ class DatabaseManager {
       }
       await this.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_imei ON stock(imei) WHERE imei IS NOT NULL');
       await this.makeStockIdentifiersNullable();
+
+      await this.run('CREATE INDEX IF NOT EXISTS idx_cash_sale_collections_sale ON cash_sale_collections(cash_sale_id)');
+      await this.run('CREATE INDEX IF NOT EXISTS idx_cash_sale_collections_date ON cash_sale_collections(collection_date)');
+      // Backfill one opening collection per legacy cash sale. Its received_price was
+      // always credited on the sale date, so that is the closest truthful date.
+      await this.run(`
+        INSERT INTO cash_sale_collections (cash_sale_id, customer_id, amount, collection_date, receipt_no, notes)
+        SELECT cs.id, cs.customer_id, cs.received_price, cs.sale_date, 'CS-OPEN-' || cs.id, 'Opening payment (migrated)'
+        FROM cash_sales cs
+        WHERE cs.received_price > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM cash_sale_collections c WHERE c.cash_sale_id = cs.id
+          )
+      `);
 
       await this.run(`CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

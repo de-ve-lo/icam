@@ -652,29 +652,15 @@ class InstallmentManager {
             console.error('Error fetching schedule data:', e);
         }
 
-        const win = window.open('', '_blank');
         const shopHeader = await Utils.shopPrintHeaderHtml();
-        const html = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Installment Schedule - ${c.account_no}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 20px; }
-                    h2 { margin-bottom: 10px; }
-                    .info { margin-bottom: 15px; }
-                    .purchase-details { margin: 15px 0; padding: 10px; background: #f9f9f9; border-left: 4px solid #007bff; }
-                    table { width: 100%; border-collapse: collapse; }
-                    td, th { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                    th { background: #f5f5f5; }
-                    .status-paid { color: #065f46; }
-                    .status-pending { color: #92400e; }
-                    .status-partial { color: #334155; }
-                    ${Utils.developerCreditCss()}
-                    ${Utils.shopPrintHeaderCss()}
-                </style>
-            </head>
-            <body>
+        const extraCss = `
+            .info { margin-bottom: 15px; }
+            .purchase-details { margin: 15px 0; padding: 10px; background: #f9f9f9; border-left: 4px solid #007bff; }
+            .status-paid { color: #065f46; }
+            .status-pending { color: #92400e; }
+            .status-partial { color: #334155; }
+        `;
+        const body = `
                 ${shopHeader}
                 <h2>Installment Schedule</h2>
                 <div class="info">
@@ -732,13 +718,9 @@ class InstallmentManager {
                     </div>
                 ` : ''}
                 ${Utils.developerCreditHtml()}
-            </body>
-            </html>
         `;
-        win.document.write(html);
-        win.document.close();
-        win.focus();
-        setTimeout(() => win.print(), 300);
+        const html = Utils.wrapPrintDocument(body, `Installment Schedule - ${c.account_no}`, extraCss);
+        Utils.showPrintPreview(html, `Installment Schedule - ${c.account_no}`);
     }
 
     async printReceipt(installmentId) {
@@ -780,28 +762,14 @@ class InstallmentManager {
             const scheduleRows = (this.installments || []).filter((row) => Number(row.purchase_id) === Number(inst.purchase_id));
             const scheduleRemaining = InstallmentEngine.totals(scheduleRows.length ? scheduleRows : [inst]).grandRemaining;
 
-            const win = window.open('', '_blank');
             const shopHeader = await Utils.shopPrintHeaderHtml();
-            const html = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Payment Receipt ${payment.receipt_no || ''}</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        h2 { margin-bottom: 10px; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                        td, th { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                        th { background: #f5f5f5; }
-                        .distribution-table { margin-top: 20px; }
-                        .distribution-table th { background: #e7f3ff; }
-                        .discount-row { color: #856404; background-color: #fff3cd; }
-                        .summary-section { margin-top: 20px; text-align: right; }
-                        ${Utils.developerCreditCss()}
-                        ${Utils.shopPrintHeaderCss()}
-                    </style>
-                </head>
-                <body>
+            const extraCss = `
+                table { margin-top: 10px; }
+                .distribution-table { margin-top: 20px; }
+                .distribution-table th { background: #e7f3ff; }
+                .discount-row { color: #856404; background-color: #fff3cd; }
+            `;
+            const body = `
                     ${shopHeader}
                     <h2>Payment Receipt</h2>
                     <table>
@@ -856,13 +824,9 @@ class InstallmentManager {
                     `}
                     <p><strong>Schedule Remaining:</strong> ${Utils.formatCurrency(scheduleRemaining)}</p>
                     ${Utils.developerCreditHtml()}
-                </body>
-                </html>
             `;
-            win.document.write(html);
-            win.document.close();
-            win.focus();
-            setTimeout(() => win.print(), 300);
+            const html = Utils.wrapPrintDocument(body, `Payment Receipt ${payment.receipt_no || ''}`, extraCss);
+            Utils.showPrintPreview(html, `Payment Receipt ${payment.receipt_no || ''}`);
         } catch (e) {
             console.error('Print receipt error:', e);
             app.showNotification('Failed to print receipt', 'error');

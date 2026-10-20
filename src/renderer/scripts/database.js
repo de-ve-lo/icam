@@ -664,9 +664,14 @@ class Database {
     }
 
     static generateReceiptNo() {
-        const timestamp = Date.now().toString();
-        const random = Math.random().toString(36).substring(2, 8);
-        return `RCP-${timestamp.slice(-6)}${random.toUpperCase()}`;
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const time = String(now.getHours()).padStart(2, '0')
+            + String(now.getMinutes()).padStart(2, '0')
+            + String(now.getSeconds()).padStart(2, '0');
+        return `REC-${year}${month}${day}-${time}`;
     }
 
     static async payInstallmentWithDistribution(installmentId, amount, paymentDate = null) {
@@ -748,10 +753,11 @@ class Database {
                       AND (is_deleted = 0 OR is_deleted IS NULL)
                       AND strftime('%Y-%m', payment_date) = ?
                     UNION ALL
-                    SELECT received_price as amount
-                    FROM cash_sales
-                    WHERE received_price > 0
-                      AND strftime('%Y-%m', sale_date) = ?
+                    SELECT amount
+                    FROM cash_sale_collections
+                    WHERE amount > 0
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                      AND strftime('%Y-%m', collection_date) = ?
                     UNION ALL
                     SELECT advance_received as amount
                     FROM customer_purchases
@@ -834,12 +840,13 @@ class Database {
                     GROUP BY strftime('%Y-%m', payment_date)
                     UNION ALL
                     SELECT
-                        strftime('%Y-%m', sale_date) as month,
-                        SUM(received_price) as total
-                    FROM cash_sales
-                    WHERE received_price > 0
-                      AND sale_date >= date('now', '-${monthsBack} months')
-                    GROUP BY strftime('%Y-%m', sale_date)
+                        strftime('%Y-%m', collection_date) as month,
+                        SUM(amount) as total
+                    FROM cash_sale_collections
+                    WHERE amount > 0
+                      AND (is_deleted = 0 OR is_deleted IS NULL)
+                      AND collection_date >= date('now', '-${monthsBack} months')
+                    GROUP BY strftime('%Y-%m', collection_date)
                 ) monthly_rows
                 GROUP BY month
                 ORDER BY month ASC
@@ -916,21 +923,23 @@ class Database {
                   AND (p.type = 'payment' OR p.type IS NULL)
                 UNION ALL
                 SELECT
-                    cs.id,
-                    cs.received_price as amount,
-                    cs.sale_date as payment_date,
-                    NULL as receipt_no,
+                    csc.id,
+                    csc.amount,
+                    csc.collection_date as payment_date,
+                    csc.receipt_no,
                     c.account_no,
                     c.cnic_no,
                     pr.item_name,
                     NULL as installment_no,
                     'cash' as source
-                FROM cash_sales cs
-                LEFT JOIN customers c ON cs.customer_id = c.id
-                JOIN stock s ON cs.stock_id = s.id
-                JOIN products pr ON s.product_id = pr.id
-                WHERE cs.sale_date BETWEEN ? AND ?
-                  AND cs.received_price > 0
+                FROM cash_sale_collections csc
+                LEFT JOIN cash_sales cs ON cs.id = csc.cash_sale_id
+                LEFT JOIN customers c ON csc.customer_id = c.id
+                LEFT JOIN stock s ON cs.stock_id = s.id
+                LEFT JOIN products pr ON s.product_id = pr.id
+                WHERE csc.collection_date BETWEEN ? AND ?
+                  AND csc.amount > 0
+                  AND (csc.is_deleted = 0 OR csc.is_deleted IS NULL)
             ) history_rows
             ORDER BY payment_date DESC
         `, [startDate, endDate, startDate, endDate]);
@@ -1199,6 +1208,27 @@ class Database {
         `, [], []);
     }
 
+    static cashSaleReceiptNo() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const time = String(now.getHours()).padStart(2, '0')
+            + String(now.getMinutes()).padStart(2, '0')
+            + String(now.getSeconds()).padStart(2, '0');
+        return `CS-${year}${month}${day}-${time}`;
+    }
+
+    static localToday() {
+        if (typeof Utils !== 'undefined' && Utils.toLocalDateString) {
+            return Utils.toLocalDateString(new Date());
+        }
+        const now = new Date();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${now.getFullYear()}-${month}-${day}`;
+    }
+
     static async addCashSale(cashSale) {
         const result = await this.run(
             `INSERT INTO cash_sales (customer_id, stock_id, sale_date, agreed_price, received_price, 
@@ -1207,12 +1237,23 @@ class Database {
             cashSale.received_price, cashSale.due_amount, cashSale.payment_status, cashSale.notes]
         );
 
+        if (Number(cashSale.received_price) > 0) {
+            const receiptNo = this.cashSaleReceiptNo();
+            await this.run(
+                `INSERT INTO cash_sale_collections
+                 (cash_sale_id, customer_id, amount, collection_date, receipt_no, notes)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [result.id, cashSale.customer_id || null, Number(cashSale.received_price),
+                    cashSale.sale_date, receiptNo, 'Payment at sale']
+            );
+        }
+
         await this.markStockSold(cashSale.stock_id, cashSale.quantity || 1);
 
         return result;
     }
 
-    static async collectCashSaleDues(cashSaleId, amount) {
+    static async collectCashSaleDues(cashSaleId, amount, collectionDate) {
         // Get current cash sale
         const cashSale = await this.get('SELECT * FROM cash_sales WHERE id = ?', [cashSaleId]);
         if (!cashSale) {
@@ -1222,13 +1263,21 @@ class Database {
         const newReceivedAmount = (cashSale.received_price || 0) + amount;
         const newDueAmount = Math.max(0, (cashSale.agreed_price || 0) - newReceivedAmount);
         const newStatus = newDueAmount > 0 ? 'partial' : 'completed';
+        const date = collectionDate || this.localToday();
+        const receiptNo = this.cashSaleReceiptNo();
 
         await this.run(
             'UPDATE cash_sales SET received_price = ?, due_amount = ?, payment_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
             [newReceivedAmount, newDueAmount, newStatus, cashSaleId]
         );
+        await this.run(
+            `INSERT INTO cash_sale_collections
+             (cash_sale_id, customer_id, amount, collection_date, receipt_no, notes)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [cashSaleId, cashSale.customer_id || null, amount, date, receiptNo, 'Due collection']
+        );
 
-        return { newReceivedAmount, newDueAmount, newStatus };
+        return { newReceivedAmount, newDueAmount, newStatus, receiptNo, collectionDate: date };
     }
 
     // Supplier Payment Management
@@ -1354,7 +1403,11 @@ class Database {
                 short: g.short,
                 current: g.current,
                 amount: g.total,
-                days_overdue: g.short > 0 ? 1 : 0,
+                days_overdue: g.short > 0 && g.due_date
+                    ? Math.max(0, (typeof Utils !== 'undefined' && Utils.localDaysBetween)
+                        ? Utils.localDaysBetween(g.due_date, today)
+                        : 0)
+                    : 0,
                 item_name: g.kind === 'both' ? 'Short + current' : (g.kind === 'short' ? 'Short' : 'Current installment')
             }));
         }
@@ -1407,7 +1460,6 @@ class Database {
               AND cp.status != 'deleted'
         `, [today, today], []);
 
-        // Get overdue cash sales (we'll consider them overdue after 30 days)
         const overdueCashSales = await this.safeQuery(`
             SELECT 
                 'cash_sale' as type,
@@ -1417,12 +1469,12 @@ class Database {
                 c.customer_name,
                 c.phone,
                 c.id as customer_id,
-                CAST(julianday('now') - julianday(cs.sale_date) as INTEGER) as days_overdue
+                CAST(julianday(?) - julianday(cs.sale_date) as INTEGER) as days_overdue
             FROM cash_sales cs
             LEFT JOIN customers c ON cs.customer_id = c.id
             WHERE cs.due_amount > 0 
-              AND julianday('now') - julianday(cs.sale_date) > 30
-        `, [], []);
+              AND julianday(?) - julianday(cs.sale_date) > 30
+        `, [today, today], []);
 
         return [...(overdueInstallments || []), ...(overdueCashSales || [])]
             .sort((a, b) => b.days_overdue - a.days_overdue);
@@ -1528,16 +1580,6 @@ class Database {
             );
         }
         return await this.query('SELECT * FROM discounts ORDER BY created_at DESC');
-    }
-
-    // Receipt number generation
-    static generateReceiptNo() {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const time = String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0') + String(now.getSeconds()).padStart(2, '0');
-        return `REC-${year}${month}${day}-${time}`;
     }
 
     // Get installment with customer details (for payRemaining functionality)

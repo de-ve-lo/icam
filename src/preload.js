@@ -9,6 +9,7 @@ const invokeAllow = [
   'backup-save-dialog', 'restore-open-dialog',
   'drive-folder-pick', 'drive-backup', 'drive-list', 'drive-restore',
   'customer-photo-pick', 'customer-photo-url',
+  'print-document', 'print-preview-pdf',
   'app-quit-now'
 ];
 

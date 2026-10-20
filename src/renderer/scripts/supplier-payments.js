@@ -354,50 +354,27 @@ class SupplierPaymentsManager {
                 return;
             }
 
-            const win = window.open('', '_blank');
             const shopHeader = await Utils.shopPrintHeaderHtml();
-            const html = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Supplier Payment Receipt - ${payment.id}</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        h2 { margin-bottom: 20px; text-align: center; }
-                        .receipt-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-                        .receipt-details { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-                        .receipt-details td, .receipt-details th { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                        .receipt-details th { background: #f5f5f5; font-weight: bold; }
-                        .total-row { background: #e8f4f8; font-weight: bold; }
-                        .print-thanks { text-align: center; margin-top: 40px; font-size: 12px; }
-                        ${Utils.developerCreditCss()}
-                        ${Utils.shopPrintHeaderCss()}
-                    </style>
-                </head>
-                <body>
-                    ${shopHeader}
-                    <h2>SUPPLIER PAYMENT RECEIPT</h2>
-                    <div class="receipt-header">
-                        <div><strong>Receipt #:</strong> SP-${payment.id.toString().padStart(6, '0')}</div>
-                        <div><strong>Date:</strong> ${Utils.formatDate(payment.payment_date, 'readable')}</div>
-                    </div>
-                    <table class="receipt-details">
-                        <tr><th>Supplier</th><td>${payment.supplier_name}</td></tr>
-                        <tr><th>Payment Amount</th><td>${Utils.formatCurrency(payment.amount)}</td></tr>
-                        <tr><th>Payment Method</th><td>${Utils.capitalizeWords(payment.payment_method || 'cash')}</td></tr>
-                        ${payment.reference_no ? `<tr><th>Reference No</th><td>${payment.reference_no}</td></tr>` : ''}
-                        <tr class="total-row"><th>Payment Date</th><td>${Utils.formatDate(payment.payment_date, 'readable')}</td></tr>
-                    </table>
-                    ${payment.notes ? `<p><strong>Notes:</strong> ${payment.notes}</p>` : ''}
-                    <p class="print-thanks">Payment processed successfully</p>
-                    ${Utils.developerCreditHtml()}
-                </body>
-                </html>
+            const body = `
+                ${shopHeader}
+                <h2 style="text-align:center;margin-bottom:20px;">SUPPLIER PAYMENT RECEIPT</h2>
+                <div style="display:flex;justify-content:space-between;margin-bottom:20px;">
+                    <div><strong>Receipt #:</strong> SP-${payment.id.toString().padStart(6, '0')}</div>
+                    <div><strong>Date:</strong> ${Utils.formatDate(payment.payment_date, 'readable')}</div>
+                </div>
+                <table>
+                    <tr><th>Supplier</th><td>${payment.supplier_name}</td></tr>
+                    <tr><th>Payment Amount</th><td>${Utils.formatCurrency(payment.amount)}</td></tr>
+                    <tr><th>Payment Method</th><td>${Utils.capitalizeWords(payment.payment_method || 'cash')}</td></tr>
+                    ${payment.reference_no ? `<tr><th>Reference No</th><td>${payment.reference_no}</td></tr>` : ''}
+                    <tr><th>Payment Date</th><td>${Utils.formatDate(payment.payment_date, 'readable')}</td></tr>
+                </table>
+                ${payment.notes ? `<p><strong>Notes:</strong> ${payment.notes}</p>` : ''}
+                <p style="text-align:center;margin-top:40px;font-size:12px;">Payment processed successfully</p>
+                ${Utils.developerCreditHtml()}
             `;
-            win.document.write(html);
-            win.document.close();
-            win.focus();
-            setTimeout(() => win.print(), 300);
+            const html = Utils.wrapPrintDocument(body, `Supplier Payment Receipt - ${payment.id}`);
+            Utils.showPrintPreview(html, `Supplier Payment Receipt - ${payment.id}`);
         } catch (error) {
             console.error('Error printing receipt:', error);
             app.showNotification('Failed to print receipt', 'error');

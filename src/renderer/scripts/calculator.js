@@ -402,29 +402,13 @@ class InstallmentCalculator {
     }
 
     async generateSchedulePDF(customer, product, stockItem, summary, schedule) {
-        const printWindow = window.open('', '_blank');
         const shopHeader = await Utils.shopPrintHeaderHtml();
-        const printContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Installment Schedule - ${customer.account_no}</title>
-                <style>
-                    body { 
-                        font-family: Arial, sans-serif; 
-                        margin: 20px; 
-                        font-size: 12px;
-                        line-height: 1.4;
-                    }
+        const extraCss = `
                     .header { 
                         text-align: center; 
                         margin-bottom: 30px; 
                         border-bottom: 2px solid #333;
                         padding-bottom: 15px;
-                    }
-                    .company-info {
-                        text-align: center;
-                        margin-bottom: 20px;
                     }
                     .info-section {
                         display: flex;
@@ -462,14 +446,10 @@ class InstallmentCalculator {
                         background-color: #f2f2f2; 
                         font-weight: bold;
                     }
-                    .schedule-table tbody tr:nth-child(even) {
-                        background-color: #f9f9f9;
-                    }
                     .summary-section {
                         background-color: #e8f4fd;
                         padding: 15px;
                         margin: 20px 0;
-                        border-radius: 5px;
                     }
                     .summary-grid {
                         display: grid;
@@ -480,9 +460,6 @@ class InstallmentCalculator {
                         display: flex;
                         justify-content: space-between;
                         padding: 5px 0;
-                    }
-                    .summary-item label {
-                        font-weight: bold;
                     }
                     .text-success { color: #28a745; }
                     .text-primary { color: #007bff; }
@@ -495,22 +472,13 @@ class InstallmentCalculator {
                         border-top: 1px solid #ddd;
                         padding-top: 15px;
                     }
-                    ${Utils.developerCreditCss()}
-                    ${Utils.shopPrintHeaderCss()}
-                    @media print {
-                        body { margin: 0; }
-                        .no-print { display: none; }
-                    }
-                </style>
-            </head>
-            <body>
+        `;
+        const body = `
                 ${shopHeader}
-
                 <div class="header">
                     <h2>Payment Schedule for ${Utils.capitalizeWords(product.item_name)}</h2>
                     <p>Generated on: ${Utils.formatDate(new Date(), 'readable')}</p>
                 </div>
-
                 <div class="info-section">
                     <div class="info-block">
                         <h3>Customer Information</h3>
@@ -521,7 +489,6 @@ class InstallmentCalculator {
                             <tr><td>Address</td><td>${customer.address}</td></tr>
                         </table>
                     </div>
-
                     <div class="info-block">
                         <h3>Product Information</h3>
                         <table class="info-table">
@@ -531,54 +498,28 @@ class InstallmentCalculator {
                         </table>
                     </div>
                 </div>
-
                 <div class="summary-section">
                     <h3>Financial Summary</h3>
                     <div class="summary-grid">
-                        <div class="summary-item">
-                            <label>Sale Price:</label>
-                            <span>${Utils.formatCurrency(summary.salePrice)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Purchase Price:</label>
-                            <span>${Utils.formatCurrency(summary.purchasePrice)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Profit Amount:</label>
-                            <span class="text-success">${Utils.formatCurrency(summary.profitAmount)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Profit Percentage:</label>
-                            <span class="text-success">${summary.profitPercentage}%</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Total Amount:</label>
-                            <span class="font-bold">${Utils.formatCurrency(summary.totalAmount)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Advance Payment:</label>
-                            <span>${Utils.formatCurrency(summary.advancePayment)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Remaining Amount:</label>
-                            <span>${Utils.formatCurrency(summary.remainingAmount)}</span>
-                        </div>
-                        <div class="summary-item">
-                            <label>Monthly Installment:</label>
-                            <span class="font-bold text-primary">${Utils.formatCurrency(summary.monthlyInstallment)}</span>
-                        </div>
+                        <div class="summary-item"><label>Sale Price:</label><span>${Utils.formatCurrency(summary.salePrice)}</span></div>
+                        <div class="summary-item"><label>Purchase Price:</label><span>${Utils.formatCurrency(summary.purchasePrice)}</span></div>
+                        <div class="summary-item"><label>Profit Amount:</label><span class="text-success">${Utils.formatCurrency(summary.profitAmount)}</span></div>
+                        <div class="summary-item"><label>Profit Percentage:</label><span class="text-success">${summary.profitPercentage}%</span></div>
+                        <div class="summary-item"><label>Total Amount:</label><span class="font-bold">${Utils.formatCurrency(summary.totalAmount)}</span></div>
+                        <div class="summary-item"><label>Advance Payment:</label><span>${Utils.formatCurrency(summary.advancePayment)}</span></div>
+                        <div class="summary-item"><label>Remaining Amount:</label><span>${Utils.formatCurrency(summary.remainingAmount)}</span></div>
+                        <div class="summary-item"><label>Monthly Installment:</label><span class="font-bold text-primary">${Utils.formatCurrency(summary.monthlyInstallment)}</span></div>
                     </div>
                 </div>
-
                 <h3>Payment Schedule (${summary.installmentMonths} Months)</h3>
                 <table class="schedule-table">
                     <thead>
                         <tr>
-                            <th style="width: 10%;">Installment #</th>
-                            <th style="width: 25%;">Due Date</th>
-                            <th style="width: 25%;">Amount Due</th>
-                            <th style="width: 25%;">Remaining Balance</th>
-                            <th style="width: 15%;">Status</th>
+                            <th>Installment #</th>
+                            <th>Due Date</th>
+                            <th>Amount Due</th>
+                            <th>Remaining Balance</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -593,30 +534,17 @@ class InstallmentCalculator {
                         `).join('')}
                     </tbody>
                 </table>
-
                 <div class="footer">
                     <p><strong>Terms & Conditions:</strong></p>
                     <p>1. All payments must be made on or before the due date.</p>
                     <p>2. Late payment charges may apply for overdue installments.</p>
                     <p>3. This schedule is subject to the terms agreed upon at the time of purchase.</p>
                     <p>4. Contact us immediately if you face any payment difficulties.</p>
-                    <br>
-                    <p>Generated by Installment Management System - ${new Date().toLocaleDateString()}</p>
                     ${Utils.developerCreditHtml()}
                 </div>
-
-                <script>
-                    window.onload = function() {
-                        window.print();
-                        setTimeout(() => window.close(), 1000);
-                    }
-                </script>
-            </body>
-            </html>
         `;
-
-        printWindow.document.write(printContent);
-        printWindow.document.close();
+        const html = Utils.wrapPrintDocument(body, `Installment Schedule - ${customer.account_no}`, extraCss);
+        Utils.showPrintPreview(html, `Installment Schedule - ${customer.account_no}`);
     }
 
     async createInstallmentPlan() {
