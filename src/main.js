@@ -70,7 +70,7 @@ function createWindow() {
       sandbox: false,
       backgroundThrottling: false
     },
-    icon: path.join(__dirname, process.platform === 'win32' ? '../assets/icon.ico' : '../assets/icon.png'),
+    icon: path.join(__dirname, '../assets/icon.ico'),
     show: false
   });
 
@@ -527,6 +527,7 @@ async function loadPrintWindow(html) {
     show: false,
     width: 900,
     height: 700,
+    icon: path.join(__dirname, '../assets/icon.ico'),
     webPreferences: {
       sandbox: true,
       contextIsolation: true,

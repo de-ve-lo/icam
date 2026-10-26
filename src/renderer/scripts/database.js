@@ -150,6 +150,22 @@ class Database {
         `);
     }
 
+    static async getCustomersNeverSold() {
+        return await this.query(`
+            SELECT c.* FROM customers c
+            WHERE c.id NOT IN (
+                SELECT customer_id FROM customer_purchases
+                WHERE customer_id IS NOT NULL
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+            )
+            AND c.id NOT IN (
+                SELECT customer_id FROM cash_sales
+                WHERE customer_id IS NOT NULL
+            )
+            ORDER BY c.created_at DESC
+        `);
+    }
+
     static async addCustomer(customer) {
         return await this.run(
             'INSERT INTO customers (account_no, cnic_no, phone, address, registration_date, other_info, customer_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -227,6 +243,24 @@ class Database {
 
     static async getGuarantors(customerId) {
         return await this.query('SELECT * FROM guarantors WHERE customer_id = ?', [customerId]);
+    }
+
+    static async getGuarantorsByCustomerIds(ids) {
+        const map = new Map();
+        const list = (ids || []).map((id) => Number(id)).filter((id) => Number.isFinite(id));
+        if (!list.length) return map;
+        const unique = Array.from(new Set(list));
+        const placeholders = unique.map(() => '?').join(',');
+        const rows = await this.query(
+            `SELECT id, customer_id, name, phone FROM guarantors WHERE customer_id IN (${placeholders}) ORDER BY id`,
+            unique
+        );
+        for (const row of rows || []) {
+            const key = Number(row.customer_id);
+            if (!map.has(key)) map.set(key, []);
+            map.get(key).push(row);
+        }
+        return map;
     }
 
     // Purchases and Installments
@@ -735,7 +769,7 @@ class Database {
                 const overdueResult = await this.get(`
                     SELECT COUNT(*) as count
                     FROM installments
-                    WHERE strftime('%Y-%m', due_date) < strftime('%Y-%m', ?)
+                    WHERE due_date <= ?
                       AND COALESCE(original_amount, amount) - COALESCE(paid_amount, 0) > 0
                       AND (is_deleted = 0 OR is_deleted IS NULL)
                 `, [asOf]);
@@ -891,7 +925,7 @@ class Database {
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
-            WHERE strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
+            WHERE i.due_date <= ?
               AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
             ORDER BY i.due_date ASC
@@ -1453,7 +1487,7 @@ class Database {
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
-            WHERE strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
+            WHERE i.due_date <= ?
               AND COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
               AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)

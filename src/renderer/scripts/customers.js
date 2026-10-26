@@ -18,6 +18,11 @@ class CustomerManager {
         try {
             app.showLoading();
             this.customers = await Database.getCustomers();
+            const gmap = await Database.getGuarantorsByCustomerIds(this.customers.map((r) => r.customer_id || r.id));
+            this.customers.forEach((r) => {
+                r._guarantors = gmap.get(Number(r.customer_id || r.id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(r, r._guarantors);
+            });
             this.renderTable();
         } catch (error) {
             console.error('Error loading customers:', error);
@@ -34,6 +39,7 @@ class CustomerManager {
         tbody.innerHTML = this.customers.map(c => `
             <tr class="stagger-item">
                 <td>${c.account_no}</td>
+                <td>${Utils.escapeHtml(c.display_name || Utils.formatCustomerIdentity(c, c._guarantors || []))}</td>
                 <td>${c.cnic_no}</td>
                 <td>${c.phone}</td>
                 <td>${Utils.truncate(c.address, 40)}</td>
@@ -276,6 +282,7 @@ class CustomerManager {
         const customer = this.customers.find(c => c.id === id);
         if (!customer) return;
         const guarantors = await Database.getGuarantors(customer.id).catch(() => []);
+        customer._guarantors = guarantors;
 
         const modalHtml = `
             <div class="modal">
@@ -287,7 +294,7 @@ class CustomerManager {
                     <div class="modal-body">
                         <div class="detail-grid">
                             <div class="detail-item"><label>Account No:</label><span>${customer.account_no}</span></div>
-                            <div class="detail-item"><label>Name:</label><span>${customer.customer_name || '-'}</span></div>
+                            <div class="detail-item"><label>Name:</label><span>${Utils.formatCustomerIdentity(customer, guarantors)}</span></div>
                             <div class="detail-item"><label>CNIC:</label><span>${customer.cnic_no}</span></div>
                             <div class="detail-item"><label>Phone:</label><span>${customer.phone}</span></div>
                             <div class="detail-item"><label>Address:</label><span>${customer.address}</span></div>
@@ -476,7 +483,7 @@ class CustomerManager {
         const settings = (typeof app !== 'undefined' && app._shopSettingsCache) || {};
         const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
         const text = Utils.fillWhatsAppTemplate(template, {
-            name: customer.customer_name || customer.account_no || '',
+            name: Utils.formatCustomerIdentity(customer, customer._guarantors || []) || customer.account_no || '',
             account: customer.account_no || '',
             amount: '',
             due_date: '',

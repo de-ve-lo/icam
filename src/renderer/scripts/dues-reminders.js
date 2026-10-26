@@ -42,6 +42,25 @@ class DuesRemindersManager {
             
             this.overdueItems = await Database.getOverdueItems() || [];
             console.log('Overdue items loaded:', this.overdueItems.length);
+
+            const attachDisplayNames = async (rows) => {
+                const gmap = await Database.getGuarantorsByCustomerIds(rows.map((r) => r.customer_id));
+                rows.forEach((r) => {
+                    if (r.customer_id == null) {
+                        r._guarantors = [];
+                        r.display_name = r.customer_name || 'Walk-in Customer';
+                        return;
+                    }
+                    r._guarantors = gmap.get(Number(r.customer_id)) || [];
+                    r.display_name = Utils.formatCustomerIdentity(
+                        { customer_name: r.customer_name, account_no: r.account_no },
+                        r._guarantors
+                    );
+                });
+            };
+            await attachDisplayNames(this.installmentDues);
+            await attachDisplayNames(this.cashSaleDues);
+            await attachDisplayNames(this.overdueItems);
             
             this.renderSummaryCards();
             this.renderCurrentTab();
@@ -182,7 +201,7 @@ class DuesRemindersManager {
                     <tbody>
                         ${this.installmentDues.map(due => `
                             <tr class="stagger-item ${due.short > 0 ? 'row-overdue' : ''}">
-                                <td><strong>${due.customer_name || 'N/A'}</strong></td>
+                                <td><strong>${due.display_name || due.customer_name}</strong></td>
                                 <td>${due.account_no}</td>
                                 <td>${due.phone}</td>
                                 <td>${Utils.formatCurrency(due.short || 0)}</td>
@@ -240,7 +259,7 @@ class DuesRemindersManager {
                         ${this.cashSaleDues.map(due => `
                             <tr class="stagger-item">
                                 <td>${Utils.formatDate(due.sale_date)}</td>
-                                <td>${due.customer_name || 'Walk-in Customer'}</td>
+                                <td>${due.display_name || due.customer_name}</td>
                                 <td>${due.phone || 'N/A'}</td>
                                 <td>${due.item_name}</td>
                                 <td>${Utils.formatCurrency(due.agreed_price)}</td>
@@ -248,9 +267,10 @@ class DuesRemindersManager {
                                 <td><strong>${Utils.formatCurrency(due.due_amount)}</strong></td>
                                 <td>
                                     <div class="action-buttons">
-                                         ${due.customer_id ? this.whatsAppLink({
+                                          ${due.customer_id ? this.whatsAppLink({
                                              phone: due.phone,
                                              customer_name: due.customer_name,
+                                             display_name: due.display_name,
                                              account_no: due.account_no,
                                              remaining_amount: due.due_amount,
                                              due_date: due.sale_date
@@ -308,16 +328,17 @@ class DuesRemindersManager {
                                         ${Utils.capitalizeWords(item.type)}
                                     </span>
                                 </td>
-                                <td><strong>${item.customer_name || 'Walk-in Customer'}</strong></td>
+                                <td><strong>${item.display_name || item.customer_name}</strong></td>
                                 <td>${item.phone || 'N/A'}</td>
                                 <td>${Utils.formatDate(item.due_date)}</td>
                                 <td><strong class="text-danger">${Utils.formatCurrency(item.amount)}</strong></td>
                                 <td><span class="text-danger"><strong>${item.days_overdue} days</strong></span></td>
                                 <td>
                                     <div class="action-buttons">
-                                         ${this.whatsAppLink({
+                                          ${this.whatsAppLink({
                                              phone: item.phone,
                                              customer_name: item.customer_name,
+                                             display_name: item.display_name,
                                              remaining_amount: item.amount,
                                              due_date: item.due_date
                                          })}
@@ -342,7 +363,7 @@ class DuesRemindersManager {
         const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
         const amount = row.remaining_amount != null ? row.remaining_amount : (row.amount != null ? row.amount : row.due_amount);
         const text = Utils.fillWhatsAppTemplate(template, {
-            name: row.customer_name || '',
+            name: row.display_name || row.customer_name || '',
             account: row.account_no || '',
             amount: typeof Utils.formatCurrency === 'function' ? Utils.formatCurrency(amount) : String(amount || ''),
             due_date: row.due_date || '',

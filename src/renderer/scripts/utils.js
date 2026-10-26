@@ -292,6 +292,21 @@ class Utils {
             .replace(/"/g, '&quot;');
     }
 
+    static formatCustomerIdentity(customer, guarantors) {
+        const name = String((customer && customer.customer_name) || '').trim() || 'Customer';
+        const parts = (guarantors || [])
+            .map((g) => String((g && g.name) || '').trim())
+            .filter(Boolean);
+        if (!parts.length) return name;
+        return name + parts.map((g) => ` C/O ${g}`).join('');
+    }
+
+    static formatCustomerOption(customer, guarantors) {
+        const identity = Utils.formatCustomerIdentity(customer, guarantors);
+        const account = String((customer && customer.account_no) || '').trim();
+        return account ? `${account} — ${identity}` : identity;
+    }
+
     static async getShopSettingsSafe() {
         try {
             if (typeof Database !== 'undefined' && Database.getShopSettings) {

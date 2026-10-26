@@ -354,6 +354,7 @@ class ReportsManager {
                     const key = keyFor(r.customer_id);
                     if (!byCustomer.has(key)) {
                         byCustomer.set(key, {
+                            customer_id: r.customer_id,
                             account_no: r.account_no,
                             customer_name: r.customer_name,
                             payments: 0,
@@ -376,6 +377,21 @@ class ReportsManager {
                 this.renderReport(this.emptyReport('Customer-wise Collection'));
                 return;
             }
+            const gmap = await Database.getGuarantorsByCustomerIds(
+                rows.filter((r) => r.customer_id != null).map((r) => r.customer_id)
+            );
+            rows.forEach((r) => {
+                if (r.customer_id == null) {
+                    r._guarantors = [];
+                    r.display_name = r.customer_name || 'Walk-in Customer';
+                    return;
+                }
+                r._guarantors = gmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
             const sum = (key) => rows.reduce((s, r) => s + r[key], 0);
             const inner = `
                 <div class="table-container">
@@ -394,7 +410,7 @@ class ReportsManager {
                         ${rows.map((r) => `
                             <tr>
                                 <td>${r.account_no}</td>
-                                <td>${r.customer_name}</td>
+                                <td>${r.display_name || r.customer_name}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.payments)}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.advances)}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.cashSales)}</td>
@@ -629,6 +645,14 @@ class ReportsManager {
                 this.renderReport(this.emptyReport('Installment Receivable and Received'));
                 return;
             }
+            const receivableGmap = await Database.getGuarantorsByCustomerIds(paper.rows.map((r) => r.customer_id));
+            paper.rows.forEach((r) => {
+                r._guarantors = receivableGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.name || r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
             const inner = `
                 <p>Who to contact. Short through ${asOf}. Remaining due through ${asOf}.</p>
                 <div class="table-container">
@@ -648,7 +672,7 @@ class ReportsManager {
                         ${paper.rows.map((r) => `
                             <tr>
                                 <td>${r.account_no}</td>
-                                <td>${r.name}</td>
+                                <td>${r.display_name || r.name}</td>
                                 <td>${r.phone}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.short)}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.current)}</td>
@@ -732,6 +756,7 @@ class ReportsManager {
                 ? InstallmentEngine.groupCustomerDues(rawRows, asOfDate)
                 : [];
             const installmentDues = grouped.map((g) => ({
+                customer_id: g.customer_id,
                 customer_name: g.customer_name,
                 account_no: g.account_no,
                 phone: g.phone,
@@ -740,10 +765,19 @@ class ReportsManager {
                 total: g.total,
                 last_payment_date: lastPayByCustomer.get(g.customer_id) || null
             }));
+            const outstandingGmap = await Database.getGuarantorsByCustomerIds(installmentDues.map((r) => r.customer_id));
+            installmentDues.forEach((r) => {
+                r._guarantors = outstandingGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
 
             // Get cash sale dues with customer details
             const cashSaleDues = await this.safeQuery(`
                 SELECT 
+                    cs.customer_id,
                     COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
                     COALESCE(c.account_no, 'N/A') as account_no,
                     COALESCE(c.phone, 'N/A') as phone,
@@ -758,9 +792,24 @@ class ReportsManager {
                 ORDER BY total_short_amount DESC
             `, [], []);
 
+            const cashRows = cashSaleDues || [];
+            const cashGmap = await Database.getGuarantorsByCustomerIds(cashRows.map((r) => r.customer_id));
+            cashRows.forEach((r) => {
+                if (r.customer_id == null) {
+                    r._guarantors = [];
+                    r.display_name = r.customer_name || 'Walk-in Customer';
+                    return;
+                }
+                r._guarantors = cashGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
+
             return {
                 installmentDues: installmentDues || [],
-                cashSaleDues: cashSaleDues || []
+                cashSaleDues: cashRows
             };
         } catch (error) {
             console.error('Error in getOutstandingData:', error);
@@ -1052,12 +1101,12 @@ class ReportsManager {
                             ${installmentDues.map(due => `
                                 <tr>
                                     <td>${due.account_no || 'N/A'}</td>
-                                    <td>${due.customer_name || 'N/A'}</td>
+                                    <td>${due.display_name || due.customer_name}</td>
                                     <td>${due.phone || 'N/A'}</td>
                                     <td class="amount">${this.safeFormatCurrency(due.short)}</td>
                                     <td class="amount">${this.safeFormatCurrency(due.current)}</td>
                                     <td class="amount">${this.safeFormatCurrency(due.total)} ${this.whatsAppButton(due.phone, {
-                                        name: due.customer_name,
+                                        name: due.display_name || due.customer_name,
                                         account: due.account_no,
                                         amount: this.safeFormatCurrency(due.total),
                                         due_date: data.asOf || ''
@@ -1097,7 +1146,7 @@ class ReportsManager {
                         <tbody>
                             ${cashSaleDues.map(due => `
                                 <tr>
-                                    <td>${due.customer_name}</td>
+                                    <td>${due.display_name || due.customer_name}</td>
                                     <td>${due.account_no || 'N/A'}</td>
                                     <td>${due.phone}</td>
                                     <td>${this.safeFormatDate(due.delivery_date)}</td>
@@ -1450,10 +1499,11 @@ class ReportsManager {
             const asOf = this.getLocalRange().end;
             const rows = await this.safeQuery(`
                 SELECT
+                    c.id as customer_id,
                     COALESCE(c.customer_name, 'N/A') as customer_name,
                     COALESCE(c.account_no, 'N/A') as account_no,
                     COALESCE(c.phone, 'N/A') as phone,
-                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 1 AND 30
+                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 0 AND 30
                         THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
                              THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_1_30,
                     SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 31 AND 60
@@ -1471,7 +1521,7 @@ class ReportsManager {
                 WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
-                  AND strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
+                  AND i.due_date <= ?
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 GROUP BY c.id, c.customer_name, c.account_no, c.phone
                 ORDER BY (bucket_1_30 + bucket_31_60 + bucket_61_90 + bucket_90_plus) DESC
@@ -1480,6 +1530,19 @@ class ReportsManager {
                 this.renderReport(this.emptyReport('Overdue Aging'));
                 return;
             }
+            const gmap = await Database.getGuarantorsByCustomerIds(rows.map((r) => r.customer_id));
+            rows.forEach((r) => {
+                if (r.customer_id == null) {
+                    r._guarantors = [];
+                    r.display_name = r.customer_name || 'Walk-in Customer';
+                    return;
+                }
+                r._guarantors = gmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
             const foot = rows.reduce((acc, r) => {
                 acc.b1 += Number(r.bucket_1_30) || 0;
                 acc.b2 += Number(r.bucket_31_60) || 0;
@@ -1509,7 +1572,7 @@ class ReportsManager {
                                 + (Number(r.bucket_61_90) || 0) + (Number(r.bucket_90_plus) || 0);
                             return `
                             <tr>
-                                <td>${r.customer_name}</td>
+                                <td>${r.display_name || r.customer_name}</td>
                                 <td>${r.account_no}</td>
                                 <td>${r.phone}</td>
                                 <td>${this.safeFormatCurrency(r.bucket_1_30)}</td>
@@ -1556,6 +1619,9 @@ class ReportsManager {
                 this.safeShowNotification('Customer not found', 'error');
                 return;
             }
+            const statementGmap = await Database.getGuarantorsByCustomerIds([customer.id]);
+            customer._guarantors = statementGmap.get(Number(customer.id)) || [];
+            customer.display_name = Utils.formatCustomerIdentity(customer, customer._guarantors);
             const purchases = await this.safeQuery(`
                 SELECT cp.id, cp.start_date, cp.sale_price, cp.total_amount, p.item_name
                 FROM customer_purchases cp
@@ -1606,7 +1672,7 @@ class ReportsManager {
             }
             const inner = `
                 ${photoHtml}
-                <p><strong>Customer:</strong> ${customer.customer_name || ''} &nbsp;
+                <p><strong>Customer:</strong> ${customer.display_name || customer.customer_name} &nbsp;
                    <strong>Account:</strong> ${customer.account_no || 'N/A'} &nbsp;
                    <strong>Phone:</strong> ${customer.phone || 'N/A'}</p>
                 <p><strong>Book remaining:</strong> ${this.safeFormatCurrency(bookRemaining)} &nbsp;
@@ -1664,7 +1730,7 @@ class ReportsManager {
 
     async promptCustomerId() {
         const customers = await this.safeQuery(
-            'SELECT id, customer_name, account_no, phone FROM customers ORDER BY customer_name',
+            'SELECT id, customer_name, account_no, phone, cnic_no FROM customers ORDER BY customer_name',
             [],
             []
         );
@@ -1676,11 +1742,9 @@ class ReportsManager {
             this.safeShowNotification('Customer picker is unavailable', 'error');
             return null;
         }
+        const gmap = await Database.getGuarantorsByCustomerIds(customers.map((c) => c.id));
+        customers.forEach((c) => { c._guarantors = gmap.get(Number(c.id)) || []; });
         return await new Promise((resolve) => {
-            const options = customers.map((c) => {
-                const label = `${c.customer_name || 'Customer'} (${c.account_no || c.phone || c.id})`;
-                return `<option value="${c.id}">${Utils.escapeHtml ? Utils.escapeHtml(label) : label}</option>`;
-            }).join('');
             const html = `
                 <div class="modal">
                     <div class="modal-content modal-sm">
@@ -1690,8 +1754,12 @@ class ReportsManager {
                         </div>
                         <div class="modal-body">
                             <div class="form-group">
+                                <label class="form-label">Search</label>
+                                <input type="search" id="statement-customer-search" class="form-input" placeholder="Search name, account, phone, CNIC, guarantor">
+                            </div>
+                            <div class="form-group">
                                 <label class="form-label">Customer</label>
-                                <select id="statement-customer-id" class="form-input">${options}</select>
+                                <select id="statement-customer-id" class="form-input"></select>
                             </div>
                         </div>
                         <div class="modal-footer">
@@ -1712,9 +1780,36 @@ class ReportsManager {
                 resolve(Number.isFinite(value) ? value : null);
             };
             app.closeModal = () => finish(null);
+            const searchEl = document.getElementById('statement-customer-search');
             const select = document.getElementById('statement-customer-id');
             const okBtn = document.getElementById('statement-ok-btn');
             const cancelBtn = document.getElementById('statement-cancel-btn');
+            const matches = (c, q) => {
+                if (!q) return true;
+                const identity = Utils.formatCustomerIdentity(c, c._guarantors || []).toLowerCase();
+                const hay = [
+                    identity,
+                    String(c.customer_name || '').toLowerCase(),
+                    String(c.account_no || '').toLowerCase(),
+                    String(c.phone || '').toLowerCase(),
+                    String(c.cnic_no || '').toLowerCase()
+                ].join(' ');
+                return hay.includes(q);
+            };
+            const renderOptions = () => {
+                const q = String((searchEl && searchEl.value) || '').trim().toLowerCase();
+                const rows = customers.filter((c) => matches(c, q));
+                if (!rows.length) {
+                    select.innerHTML = '<option value="" disabled>No matches</option>';
+                    return;
+                }
+                select.innerHTML = rows.map((c) => {
+                    const label = Utils.formatCustomerOption(c, c._guarantors);
+                    return `<option value="${c.id}">${Utils.escapeHtml(label)}</option>`;
+                }).join('');
+            };
+            if (searchEl) searchEl.addEventListener('input', renderOptions);
+            renderOptions();
             if (okBtn) okBtn.addEventListener('click', () => finish(select ? parseInt(select.value, 10) : null));
             if (cancelBtn) cancelBtn.addEventListener('click', () => finish(null));
         });
@@ -1722,7 +1817,7 @@ class ReportsManager {
 
     async promptReceivableCustomers() {
         const customers = await this.safeQuery(
-            'SELECT id, customer_name, account_no, phone FROM customers ORDER BY customer_name',
+            'SELECT id, customer_name, account_no, phone, cnic_no FROM customers ORDER BY customer_name',
             [],
             []
         );
@@ -1734,6 +1829,8 @@ class ReportsManager {
             this.safeShowNotification('Customer picker is unavailable', 'error');
             return null;
         }
+        const gmap = await Database.getGuarantorsByCustomerIds(customers.map((c) => c.id));
+        customers.forEach((c) => { c._guarantors = gmap.get(Number(c.id)) || []; });
         const esc = (typeof Utils !== 'undefined' && Utils.escapeHtml) ? Utils.escapeHtml.bind(Utils) : (v) => String(v || '');
         return await new Promise((resolve) => {
             const html = `
@@ -1790,15 +1887,21 @@ class ReportsManager {
             const customerById = new Map(customers.map((c) => [Number(c.id), c]));
             const matches = (c, q) => {
                 if (!q) return true;
-                const name = String(c.customer_name || '').toLowerCase();
-                const acc = String(c.account_no || '').toLowerCase();
-                return name.includes(q) || acc.includes(q);
+                const identity = Utils.formatCustomerIdentity(c, c._guarantors || []).toLowerCase();
+                const hay = [
+                    identity,
+                    String(c.customer_name || '').toLowerCase(),
+                    String(c.account_no || '').toLowerCase(),
+                    String(c.phone || '').toLowerCase(),
+                    String(c.cnic_no || '').toLowerCase()
+                ].join(' ');
+                return hay.includes(q);
             };
             const renderList = () => {
                 if (!listEl) return;
                 const q = String((searchEl && searchEl.value) || '').trim().toLowerCase();
                 listEl.innerHTML = customers.filter((c) => matches(c, q)).map((c) => {
-                    const label = `${c.customer_name || 'Customer'} (${c.account_no || c.phone || c.id})`;
+                    const label = Utils.formatCustomerOption(c, c._guarantors);
                     return `<option value="${c.id}">${esc(label)}</option>`;
                 }).join('');
             };
@@ -1806,7 +1909,7 @@ class ReportsManager {
                 if (!chipsEl) return;
                 chipsEl.innerHTML = selectedIds.map((id) => {
                     const c = customerById.get(id);
-                    const label = c ? `${c.customer_name || 'Customer'} (${c.account_no || c.id})` : String(id);
+                    const label = c ? Utils.formatCustomerOption(c, c._guarantors) : String(id);
                     return `<span class="status-badge">${esc(label)} <button type="button" class="btn btn-sm btn-danger" data-remove-id="${id}">Remove</button></span>`;
                 }).join('');
             };
@@ -1966,6 +2069,7 @@ class ReportsManager {
                 const id = row.customer_id;
                 if (!byCustomer.has(id)) {
                     byCustomer.set(id, {
+                        customer_id: id,
                         customer_name: row.customer_name,
                         phone: row.phone,
                         account_no: row.account_no,
@@ -1982,6 +2086,14 @@ class ReportsManager {
                 }
             }
             const grouped = Array.from(byCustomer.values());
+            const upcomingGmap = await Database.getGuarantorsByCustomerIds(Array.from(byCustomer.keys()));
+            grouped.forEach((r) => {
+                r._guarantors = upcomingGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
             if (!grouped.length) {
                 this.renderReport(this.emptyReport('Upcoming Dues'));
                 return;
@@ -2013,7 +2125,7 @@ class ReportsManager {
                     <tbody>
                         ${grouped.map((r) => `
                             <tr>
-                                <td>${r.customer_name || ''}</td>
+                                <td>${r.display_name || r.customer_name}</td>
                                 <td>${r.phone || ''}</td>
                                 <td>${r.account_no || ''}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.amount)}</td>
@@ -2052,7 +2164,7 @@ class ReportsManager {
                 LEFT JOIN products p ON s.product_id = p.id
                 WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
-                  AND strftime('%Y-%m', i.due_date) < strftime('%Y-%m', ?)
+                  AND i.due_date <= ?
                   AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 ORDER BY i.due_date, c.customer_name
             `, [asOf], []);
@@ -2073,9 +2185,7 @@ class ReportsManager {
             for (const row of rows) {
                 const leftover = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
                 if (leftover <= 0) continue;
-                const dueYm = String(row.due_date || '').slice(0, 7);
-                const asOfYm = String(asOf || '').slice(0, 7);
-                if (!dueYm || !asOfYm || dueYm >= asOfYm) continue;
+                if (!row.due_date || String(row.due_date).slice(0, 10) > String(asOf).slice(0, 10)) continue;
                 const prev = oldestShortDue.get(row.customer_id);
                 if (!prev || String(row.due_date) < String(prev)) {
                     oldestShortDue.set(row.customer_id, row.due_date);
@@ -2085,6 +2195,7 @@ class ReportsManager {
                 const oldest = oldestShortDue.get(g.customer_id) || g.due_date;
                 const days = this.daysBetween(oldest, asOf);
                 return {
+                    customer_id: g.customer_id,
                     customer_name: g.customer_name,
                     phone: g.phone,
                     account_no: g.account_no,
@@ -2093,6 +2204,14 @@ class ReportsManager {
                     days_since: days,
                     due_date: oldest
                 };
+            });
+            const defaulterGmap = await Database.getGuarantorsByCustomerIds(defaulters.map((r) => r.customer_id));
+            defaulters.forEach((r) => {
+                r._guarantors = defaulterGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
             });
             if (!defaulters.length) {
                 this.renderReport(this.emptyReport('Defaulter List'));
@@ -2115,11 +2234,11 @@ class ReportsManager {
                     <tbody>
                         ${defaulters.map((r) => `
                             <tr>
-                                <td>${r.customer_name || ''}</td>
+                                <td>${r.display_name || r.customer_name}</td>
                                 <td>${r.phone || ''}</td>
                                 <td>${r.account_no || ''}</td>
                                 <td class="amount">${this.safeFormatCurrency(r.short)} ${this.whatsAppButton(r.phone, {
-                                    name: r.customer_name,
+                                    name: r.display_name || r.customer_name,
                                     account: r.account_no,
                                     amount: this.safeFormatCurrency(r.short),
                                     due_date: r.due_date

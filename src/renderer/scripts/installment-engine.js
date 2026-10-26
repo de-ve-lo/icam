@@ -145,10 +145,17 @@
       return dueYm < asOfYm;
     },
 
+    isDueOrPast(dueDate, asOfDate) {
+      const due = String(dueDate || '').slice(0, 10);
+      const asOf = String(asOfDate || '').slice(0, 10);
+      if (!due || !asOf) return false;
+      return due <= asOf;
+    },
+
     totalShort(rows, asOfDate) {
       let short = 0;
       for (const row of rows || []) {
-        if (!this.isMonthPassed(row.due_date, asOfDate)) continue;
+        if (!this.isDueOrPast(row.due_date, asOfDate)) continue;
         const original = Number(row.original_amount) || 0;
         const paid = Number(row.paid_amount) || 0;
         short += Math.max(0, original - paid);
@@ -163,6 +170,7 @@
       for (const row of rows || []) {
         const dueYm = String(row.due_date || '').slice(0, 7);
         if (dueYm !== asOfYm) continue;
+        if (this.isDueOrPast(row.due_date, asOfDate)) continue;
         if (row.status === 'paid' || row.status === 'settled') continue;
         const leftover = Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0));
         if (leftover <= 0) continue;
@@ -183,7 +191,7 @@
       else if (current > 0) kind = 'current';
       let due_date = dueDate;
       if (!due_date && short > 0) {
-        const shortRow = list.find((row) => this.isMonthPassed(row.due_date, asOfDate)
+        const shortRow = list.find((row) => this.isDueOrPast(row.due_date, asOfDate)
           && Math.max(0, (Number(row.original_amount) || 0) - (Number(row.paid_amount) || 0)) > 0);
         due_date = shortRow ? shortRow.due_date : null;
       }

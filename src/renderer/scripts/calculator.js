@@ -14,7 +14,12 @@ class InstallmentCalculator {
         try {
             this.products = await Database.getProducts();
             this.suppliers = await Database.getSuppliers();
-            this.customers = await Database.getCustomers();
+            this.customers = await Database.getCustomersNeverSold();
+            const gmap = await Database.getGuarantorsByCustomerIds(this.customers.map((r) => r.customer_id || r.id));
+            this.customers.forEach((r) => {
+                r._guarantors = gmap.get(Number(r.customer_id || r.id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(r, r._guarantors);
+            });
             this.availableStock = await Database.getAvailableStock();
         } catch (error) {
             console.error('Error initializing calculator:', error);
@@ -40,7 +45,7 @@ class InstallmentCalculator {
                                             <label class="form-label required">Select Customer</label>
                                             <select name="customer_id" class="form-input" required>
                                                 <option value="">Choose Customer</option>
-                                                ${this.customers.map(c => `<option value=\"${c.id}\">${c.account_no} - ${c.customer_name || ''}</option>`).join('')}
+                                                ${this.customers.map(c => `<option value="${c.id}">${Utils.escapeHtml(Utils.formatCustomerOption(c, c._guarantors || []))}</option>`).join('')}
                                             </select>
                                             <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="app.customers.showAddModal()">
                                                 <i class="fas fa-plus"></i> Add New Customer

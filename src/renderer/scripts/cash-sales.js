@@ -19,6 +19,11 @@ class CashSalesManager {
         try {
             app.showLoading();
             this.customers = await Database.getCustomers();
+            const gmap = await Database.getGuarantorsByCustomerIds(this.customers.map((r) => r.customer_id || r.id));
+            this.customers.forEach((r) => {
+                r._guarantors = gmap.get(Number(r.customer_id || r.id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(r, r._guarantors);
+            });
             this.availableStock = await Database.getAvailableStock();
             this.cashSales = await Database.getCashSales();
             this.renderCashSales();
@@ -123,7 +128,7 @@ class CashSalesManager {
                                 <select name="customer_id" class="form-input">
                                     <option value="">Walk-in Customer</option>
                                     ${this.customers.map(customer => `
-                                        <option value="${customer.id}">${customer.customer_name || customer.account_no} - ${customer.cnic_no}</option>
+                                        <option value="${customer.id}">${Utils.escapeHtml(Utils.formatCustomerOption(customer, customer._guarantors || []))}</option>
                                     `).join('')}
                                 </select>
                             </div>

@@ -25,6 +25,9 @@ class InstallmentManager {
 
     async showCustomerDetails(customer) {
         this.currentCustomer = customer;
+        if (!customer._guarantors) {
+            customer._guarantors = await Database.getGuarantors(customer.id).catch(() => []);
+        }
 
         try {
             console.log(`👤 Loading customer details for: ${customer.account_no} - ${customer.customer_name}`);
@@ -93,7 +96,7 @@ class InstallmentManager {
                                                 <div class="customer-basic-stack">
                                                     <div class="customer-basic-name">
                                                         <i class="fas fa-user-circle"></i>
-                                                        <strong>${customer.account_no} - ${customer.customer_name || 'N/A'}</strong>
+                                                        <strong>${Utils.escapeHtml(Utils.formatCustomerOption(customer, customer._guarantors || []))}</strong>
                                                     </div>
                                                     <div class="customer-basic-meta">
                                                         <span><i class="fas fa-id-card"></i> CNIC: ${customer.cnic_no}</span>
@@ -110,6 +113,9 @@ class InstallmentManager {
                                                 </button>
                                                 <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); app.installments.selectCustomerAndClose(${customer.id});">
                                                     <i class="fas fa-user-check"></i> Select
+                                                </button>
+                                                <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); app.installments.printLedger(${customer.id});">
+                                                    <i class="fas fa-print"></i> Print Ledger
                                                 </button>
                                             </div>
                                         </div>
@@ -213,7 +219,7 @@ class InstallmentManager {
             <div class="customer-result-details">
                 <div class="customer-info-compact">
                     <div class="info-row">
-                        <div><strong><i class="fas fa-user"></i> Customer:</strong> ${customer.account_no} - ${customer.customer_name || 'N/A'}</div>
+                        <div><strong><i class="fas fa-user"></i> Customer:</strong> ${Utils.escapeHtml(Utils.formatCustomerOption(customer, customer._guarantors || []))}</div>
                         <div><strong><i class="fas fa-map-marker-alt"></i> Address:</strong> ${customer.address}</div>
                         <div><strong><i class="fas fa-phone"></i> Phone:</strong> ${customer.phone}</div>
                     </div>
@@ -265,6 +271,9 @@ class InstallmentManager {
                     <button class="btn btn-success" onclick="app.installments.selectCustomerAndClose(${customer.id})">
                         <i class="fas fa-user-check"></i> Select This Customer
                     </button>
+                    <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); app.installments.printLedger(${customer.id});">
+                        <i class="fas fa-print"></i> Print Ledger
+                    </button>
                     <button class="btn btn-secondary" onclick="app.closeModal()">
                         <i class="fas fa-times"></i> Close Search
                     </button>
@@ -300,6 +309,13 @@ class InstallmentManager {
         try {
             app.showLoading();
             const results = await Database.searchCustomersExtended(searchTerm.trim());
+            if (results.length) {
+                const gmap = await Database.getGuarantorsByCustomerIds(results.map((c) => c.id));
+                results.forEach((r) => {
+                    r._guarantors = gmap.get(Number(r.id)) || [];
+                    r.display_name = Utils.formatCustomerIdentity(r, r._guarantors);
+                });
+            }
             if (results.length === 0) {
                 app.showNotification('No customers found', 'info');
                 return;
@@ -358,7 +374,7 @@ class InstallmentManager {
                 <div class="card-body">
                     <div class="detail-grid">
                         <div class="detail-item"><label>Account No:</label><span>${c.account_no}</span></div>
-                        <div class="detail-item"><label>Name:</label><span>${c.customer_name || '-'}</span></div>
+                        <div class="detail-item"><label>Name:</label><span>${Utils.escapeHtml(Utils.formatCustomerIdentity(c, c._guarantors || []))}</span></div>
                         <div class="detail-item"><label>CNIC:</label><span>${c.cnic_no}</span></div>
                         <div class="detail-item"><label>Phone:</label><span>${c.phone}</span></div>
                         <div class="detail-item"><label>Address:</label><span>${c.address}</span></div>
@@ -378,6 +394,9 @@ class InstallmentManager {
                 <div class="card-footer">
                     <button class="btn btn-secondary" onclick="app.installments.printCurrentSchedule()">
                         <i class="fas fa-print"></i> Print First Schedule
+                    </button>
+                    <button class="btn btn-secondary" onclick="app.installments.printLedger(${c.id})">
+                        <i class="fas fa-print"></i> Print Ledger
                     </button>
                 </div>
             </div>
@@ -610,6 +629,101 @@ class InstallmentManager {
         }
     }
 
+    async printLedger(customerId) {
+        try {
+            app.showLoading();
+            const customer = await Database.get('SELECT * FROM customers WHERE id = ?', [customerId]);
+            if (!customer) {
+                app.showNotification('Customer not found', 'error');
+                return;
+            }
+            const guarantors = await Database.getGuarantors(customerId).catch(() => []);
+            const installments = await Database.getCustomerInstallments(customerId);
+            const payments = await Database.query(
+                `SELECT payment_date, amount, receipt_no, type, notes
+                 FROM payments
+                 WHERE customer_id = ?
+                   AND (is_deleted = 0 OR is_deleted IS NULL)
+                   AND (type IS NULL OR type = 'payment')
+                 ORDER BY payment_date`,
+                [customerId]
+            );
+            const asOf = Utils.toLocalDateString(new Date());
+            const dues = InstallmentEngine.customerDueSummary(installments || [], asOf);
+            const book = InstallmentEngine.totals(installments || []);
+            const groups = InstallmentEngine.groupByPurchase(installments || []);
+            const identity = Utils.formatCustomerIdentity(customer, guarantors);
+            const shopHeader = await Utils.shopPrintHeaderHtml();
+            const extraCss = `
+            .ledger-meta { margin-bottom: 12px; }
+            .ledger-headline { margin: 12px 0; padding: 8px; background: #f8fafc; }
+        `;
+            const scheduleTables = groups.length ? groups.map((group) => {
+                const rows = this.scheduleDisplayRows(group.installments);
+                const heading = this.scheduleHeading(rows);
+                return `
+              <h3>${Utils.escapeHtml(heading)}</h3>
+              <table>
+                <thead><tr><th>#</th><th>Due Date</th><th>Amount</th><th>Paid</th><th>Status</th><th>Remaining</th></tr></thead>
+                <tbody>
+                  ${rows.map((i) => `
+                    <tr>
+                      <td>${i.installment_no}</td>
+                      <td>${Utils.formatDate(i.due_date)}</td>
+                      <td>${Utils.formatCurrency(i.displayDueAmount)}</td>
+                      <td>${Utils.formatCurrency(i.paid_amount || 0)}</td>
+                      <td>${Utils.capitalizeWords(i.computedStatus)}</td>
+                      <td>${Utils.formatCurrency(i.displayRemainingAmount)}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>`;
+            }).join('') : '<p>No installment schedule.</p>';
+            const payTable = (payments || []).length ? `
+          <table>
+            <thead><tr><th>Date</th><th>Amount</th><th>Receipt</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${(payments || []).map((p) => `
+                <tr>
+                  <td>${Utils.formatDate(p.payment_date)}</td>
+                  <td>${Utils.formatCurrency(p.amount)}</td>
+                  <td>${Utils.escapeHtml(p.receipt_no || 'N/A')}</td>
+                  <td>${Utils.escapeHtml(p.notes || '')}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>` : '<p>No payments.</p>';
+            const gPhones = (guarantors || []).filter((g) => g.phone).map((g) => `${g.name}: ${g.phone}`).join(' | ');
+            const body = `
+          ${shopHeader}
+          <h2>Customer Ledger</h2>
+          <div class="ledger-meta">
+            <p><strong>Account:</strong> ${Utils.escapeHtml(customer.account_no || '')}
+               &nbsp; <strong>Name:</strong> ${Utils.escapeHtml(identity)}</p>
+            <p><strong>CNIC:</strong> ${Utils.escapeHtml(customer.cnic_no || '')}
+               &nbsp; <strong>Phone:</strong> ${Utils.escapeHtml(customer.phone || '')}</p>
+            <p><strong>Address:</strong> ${Utils.escapeHtml(customer.address || '')}</p>
+            ${gPhones ? `<p><strong>Guarantor phones:</strong> ${Utils.escapeHtml(gPhones)}</p>` : ''}
+          </div>
+          <div class="ledger-headline">
+            <strong>Short:</strong> ${Utils.formatCurrency(dues.short)}
+            &nbsp; <strong>Current:</strong> ${Utils.formatCurrency(dues.current)}
+            &nbsp; <strong>Total (as of ${asOf}):</strong> ${Utils.formatCurrency(dues.total)}
+            &nbsp; <strong>Book remaining:</strong> ${Utils.formatCurrency(book.grandRemaining)}
+          </div>
+          ${scheduleTables}
+          <h3>Payments</h3>
+          ${payTable}
+          ${Utils.developerCreditHtml()}
+        `;
+            const html = Utils.wrapPrintDocument(body, `Customer Ledger - ${customer.account_no || customerId}`, extraCss);
+            Utils.showPrintPreview(html, `Customer Ledger - ${customer.account_no || customerId}`);
+        } catch (error) {
+            console.error('Print ledger failed:', error);
+            app.showNotification('Failed to print ledger', 'error');
+        } finally {
+            app.hideLoading();
+        }
+    }
+
     async printCurrentSchedule(purchaseIdArg = null) {
         if (!this.currentCustomer || !this.installments || this.installments.length === 0) {
             app.showNotification('No schedule to print', 'warning');
@@ -665,7 +779,7 @@ class InstallmentManager {
                 <h2>Installment Schedule</h2>
                 <div class="info">
                     <strong>Account No:</strong> ${c.account_no} &nbsp; 
-                    <strong>Name:</strong> ${c.customer_name || '-'} &nbsp; 
+                    <strong>Name:</strong> ${Utils.escapeHtml(Utils.formatCustomerIdentity(c, c._guarantors || []))} &nbsp; 
                     <strong>CNIC:</strong> ${c.cnic_no} &nbsp; 
                     <strong>Phone:</strong> ${c.phone}
                 </div>

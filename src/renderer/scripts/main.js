@@ -978,9 +978,11 @@ class App {
         try {
             const { customers, stock } = await Database.globalSearch(q);
             const items = [];
-            (customers || []).forEach((c) => {
+            const customerRows = customers || [];
+            const gmap = await Database.getGuarantorsByCustomerIds(customerRows.map((c) => c.id));
+            customerRows.forEach((c) => {
                 items.push(`<button type="button" class="global-search-item" data-kind="customer" data-id="${c.id}">
-                    <strong>${c.customer_name || c.account_no}</strong>
+                    <strong>${Utils.escapeHtml(Utils.formatCustomerIdentity(c, gmap.get(Number(c.id)) || []))}</strong>
                     <small>${c.account_no || ''} ${c.phone || ''}</small>
                 </button>`);
             });
