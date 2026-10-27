@@ -736,8 +736,7 @@ class ReportsManager {
                 JOIN customers c ON cp.customer_id = c.id
                 LEFT JOIN stock s ON cp.stock_id = s.id
                 LEFT JOIN products p ON s.product_id = p.id
-                WHERE (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
-                  AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+                WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
                 ORDER BY i.due_date ASC
@@ -2103,7 +2102,6 @@ class ReportsManager {
                 SELECT due_date, COALESCE(original_amount, amount) as original_amount, COALESCE(paid_amount, 0) as paid_amount
                 FROM installments
                 WHERE (is_deleted = 0 OR is_deleted IS NULL)
-                  AND (COALESCE(original_amount, amount) - COALESCE(paid_amount, 0)) > 0
             `, [], []);
             const totalShort = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.totalShort)
                 ? InstallmentEngine.totalShort(shortRows, asOf)
@@ -2165,7 +2163,6 @@ class ReportsManager {
                 WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND i.due_date <= ?
-                  AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
                 ORDER BY i.due_date, c.customer_name
             `, [asOf], []);
             const lastPayRows = await this.safeQuery(`

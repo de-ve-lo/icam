@@ -275,11 +275,13 @@ class InstallmentCalculator {
                 customMonthlyAmount: isNaN(customInstallment) ? undefined : customInstallment
             });
 
+            const customerId = parseInt(formData.get('customer_id'));
             this.currentCalculation = {
                 ...calculation,
                 stockItem,
                 product,
-                customerId: parseInt(formData.get('customer_id'))
+                customerId,
+                customer: this.customers.find(c => Number(c.id) === customerId)
             };
 
             this.displayResults(calculation);
@@ -396,8 +398,8 @@ class InstallmentCalculator {
         if (!this.currentCalculation) return;
 
         const { summary, schedule, stockItem, product } = this.currentCalculation;
-        const customer = this.customers.find(c => c.id === this.currentCalculation.customerId);
-        
+        const customer = this.currentCalculation.customer;
+
         if (!customer) {
             app.showNotification('Please select a customer first', 'error');
             return;
@@ -597,11 +599,12 @@ class InstallmentCalculator {
 
             app.hideLoading();
             app.showNotification('Installment plan created successfully!', 'success');
+            const customer = this.customers.find(c => Number(c.id) === customerId)
+                || (this.currentCalculation && this.currentCalculation.customer);
             this.currentCalculation = null;
             await this.initialize();
             app.closeModal();
 
-            const customer = this.customers.find(c => c.id === customerId);
             const summaryCopy = summary;
             const productCopy = product;
             const stockCopy = stockItem;

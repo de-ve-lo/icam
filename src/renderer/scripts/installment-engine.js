@@ -153,14 +153,14 @@
     },
 
     totalShort(rows, asOfDate) {
-      let short = 0;
+      let original = 0;
+      let paid = 0;
       for (const row of rows || []) {
         if (!this.isDueOrPast(row.due_date, asOfDate)) continue;
-        const original = Number(row.original_amount) || 0;
-        const paid = Number(row.paid_amount) || 0;
-        short += Math.max(0, original - paid);
+        original += Number(row.original_amount) || 0;
+        paid += Number(row.paid_amount) || 0;
       }
-      return short;
+      return Math.max(0, original - paid);
     },
 
     currentUnpaid(rows, asOfDate) {

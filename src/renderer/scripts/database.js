@@ -1414,18 +1414,13 @@ class Database {
                 c.phone,
                 c.id as customer_id,
                 p.item_name,
-                CASE
-                    WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                    THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)
-                    ELSE 0
-                END as remaining_amount
+                COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) as remaining_amount
             FROM installments i
             JOIN customer_purchases cp ON i.purchase_id = cp.id
             JOIN customers c ON cp.customer_id = c.id
             JOIN stock s ON cp.stock_id = s.id
             JOIN products p ON s.product_id = p.id
-            WHERE COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-              AND (i.is_deleted = 0 OR i.is_deleted IS NULL)
+            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
               AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
               AND cp.status != 'deleted'
             ORDER BY i.due_date ASC
