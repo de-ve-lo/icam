@@ -12,13 +12,12 @@
     inset: 0;
     width: 100vw;
     height: 100vh;
-    background-color: rgba(0, 0, 0, 0.6);
+    background-color: rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 2147483001;
-    backdrop-filter: blur(4px);
-    overflow: auto; /* allow scrolling if content is taller */
+    overflow: auto;
 }
 
 .modal-content {
@@ -38,12 +37,12 @@
 .modal-content.modal-xl { width: 90vw; }
 
 .modal-header {
-    padding: 1.5rem 2rem;
+    padding: 1.25rem 1.5rem;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: var(--background-color);
+    background: #FFFFFF;
     border-radius: var(--border-radius) var(--border-radius) 0 0;
 }
 

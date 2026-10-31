@@ -53,10 +53,6 @@
                 <button id="hamburger-btn" class="btn btn-secondary hamburger" type="button" aria-label="Toggle menu" aria-expanded="false">
                     <i class="fas fa-bars"></i>
                 </button>
-                <div class="logo">
-                    <i class="fas fa-calculator"></i>
-                    <h1 id="header-shop-name">Installment Management System</h1>
-                </div>
                 <div class="global-search">
                     <input type="search" id="global-search" class="form-input" placeholder="Search customers or stock" autocomplete="off">
                     <div id="global-search-results" class="global-search-results hidden"></div>
@@ -90,18 +86,24 @@
         <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
         <!-- Sidebar Navigation -->
         <nav class="sidebar" id="app-sidebar">
-            <div class="sidebar-toolbar">
+            <div class="sidebar-brand">
+                <div class="logo">
+                    <i class="fas fa-calculator"></i>
+                    <h1 id="header-shop-name">Installment Management System</h1>
+                </div>
                 <button id="sidebar-collapse-btn" class="btn btn-secondary sidebar-collapse-btn" type="button" title="Minimize sidebar" aria-label="Minimize sidebar" aria-expanded="true">
                     <i class="fas fa-angles-left"></i>
                 </button>
             </div>
             <ul class="nav-menu">
+                <li class="nav-group-label">MENU</li>
                 <li class="nav-item active">
                     <a href="#dashboard" class="nav-link" data-section="dashboard">
                         <i class="fas fa-tachometer-alt"></i>
                         <span>Dashboard</span>
                     </a>
                 </li>
+                <li class="nav-group-label">OPERATIONS</li>
                 <li class="nav-item">
                     <a href="#products" class="nav-link" data-section="products">
                         <i class="fas fa-motorcycle"></i>
@@ -168,6 +170,7 @@
                         <span>Reports</span>
                     </a>
                 </li>
+                <li class="nav-group-label">ADMIN</li>
                 <li class="nav-item" data-admin-only>
                     <a href="#users" class="nav-link" data-section="users">
                         <i class="fas fa-user-shield"></i>
