@@ -1217,6 +1217,7 @@ class Database {
                 cs.*,
                 c.customer_name,
                 c.account_no,
+                c.phone,
                 p.item_name,
                 p.category,
                 s.engine_no,
@@ -1393,6 +1394,20 @@ class Database {
         );
     }
 
+    static async updateExpense(id, expense) {
+        return await this.run(
+            'UPDATE expenses SET expense_type_id = ?, amount = ?, date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [expense.expense_type_id, expense.amount, expense.date, expense.notes, id]
+        );
+    }
+
+    static async updateExpenseType(id, expenseType) {
+        return await this.run(
+            'UPDATE expense_types SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [expenseType.name, expenseType.description, id]
+        );
+    }
+
     static async deleteExpense(expenseId) {
         return await this.run('DELETE FROM expenses WHERE id = ?', [expenseId]);
     }
@@ -1449,6 +1464,7 @@ class Database {
                 cs.*,
                 c.customer_name,
                 c.phone,
+                c.account_no,
                 c.id as customer_id,
                 p.item_name
             FROM cash_sales cs

@@ -1496,24 +1496,15 @@ class ReportsManager {
             this.safeShowLoading();
             const shopName = await this.getShopName();
             const asOf = this.getLocalRange().end;
-            const rows = await this.safeQuery(`
+            const installmentRows = await this.safeQuery(`
                 SELECT
                     c.id as customer_id,
                     COALESCE(c.customer_name, 'N/A') as customer_name,
                     COALESCE(c.account_no, 'N/A') as account_no,
                     COALESCE(c.phone, 'N/A') as phone,
-                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 0 AND 30
-                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_1_30,
-                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 31 AND 60
-                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_31_60,
-                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) BETWEEN 61 AND 90
-                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_61_90,
-                    SUM(CASE WHEN CAST(julianday(?) - julianday(i.due_date) AS INTEGER) > 90
-                        THEN CASE WHEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) > 0
-                             THEN COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0) ELSE 0 END ELSE 0 END) as bucket_90_plus
+                    i.due_date,
+                    COALESCE(i.original_amount, i.amount) as original_amount,
+                    COALESCE(i.paid_amount, 0) as paid_amount
                 FROM installments i
                 JOIN customer_purchases cp ON i.purchase_id = cp.id
                 JOIN customers c ON cp.customer_id = c.id
@@ -1521,10 +1512,82 @@ class ReportsManager {
                   AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
                   AND cp.status != 'deleted'
                   AND i.due_date <= ?
-                  AND (COALESCE(i.original_amount, i.amount) - COALESCE(i.paid_amount, 0)) > 0
-                GROUP BY c.id, c.customer_name, c.account_no, c.phone
-                ORDER BY (bucket_1_30 + bucket_31_60 + bucket_61_90 + bucket_90_plus) DESC
-            `, [asOf, asOf, asOf, asOf, asOf], []);
+            `, [asOf], []);
+            const cashSales = await this.safeQuery(`
+                SELECT
+                    c.id as customer_id,
+                    COALESCE(c.customer_name, 'Walk-in Customer') as customer_name,
+                    COALESCE(c.account_no, '') as account_no,
+                    COALESCE(c.phone, '') as phone,
+                    cs.id as cash_sale_id,
+                    cs.sale_date as due_date,
+                    cs.due_amount as original_amount,
+                    0 as paid_amount
+                FROM cash_sales cs
+                LEFT JOIN customers c ON cs.customer_id = c.id
+                WHERE cs.due_amount > 0
+                  AND cs.sale_date <= ?
+            `, [asOf], []);
+
+            const byKey = new Map();
+            const addRow = (key, meta, list) => {
+                if (!byKey.has(key)) {
+                    byKey.set(key, {
+                        customer_id: meta.customer_id,
+                        customer_name: meta.customer_name,
+                        account_no: meta.account_no,
+                        phone: meta.phone,
+                        rows: []
+                    });
+                }
+                byKey.get(key).rows.push(...list);
+            };
+            const instByCustomer = new Map();
+            for (const row of installmentRows || []) {
+                const id = Number(row.customer_id);
+                if (!instByCustomer.has(id)) instByCustomer.set(id, []);
+                instByCustomer.get(id).push(row);
+            }
+            for (const [id, list] of instByCustomer.entries()) {
+                addRow('c:' + id, list[0], list);
+            }
+            for (const sale of cashSales || []) {
+                if (sale.customer_id == null) {
+                    addRow('walk:' + sale.cash_sale_id, {
+                        customer_id: null,
+                        customer_name: 'Walk-in Customer',
+                        account_no: '',
+                        phone: sale.phone || ''
+                    }, [sale]);
+                } else {
+                    addRow('c:' + Number(sale.customer_id), sale, [sale]);
+                }
+            }
+
+            const rows = [];
+            for (const entry of byKey.values()) {
+                const buckets = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.agingBuckets)
+                    ? InstallmentEngine.agingBuckets(entry.rows, asOf)
+                    : { bucket_1_30: 0, bucket_31_60: 0, bucket_61_90: 0, bucket_90_plus: 0, total: 0 };
+                if (buckets.total <= 0) continue;
+                rows.push({
+                    customer_id: entry.customer_id,
+                    customer_name: entry.customer_name,
+                    account_no: entry.account_no,
+                    phone: entry.phone,
+                    bucket_1_30: buckets.bucket_1_30,
+                    bucket_31_60: buckets.bucket_31_60,
+                    bucket_61_90: buckets.bucket_61_90,
+                    bucket_90_plus: buckets.bucket_90_plus
+                });
+            }
+            rows.sort((a, b) => {
+                const ta = (Number(a.bucket_1_30) || 0) + (Number(a.bucket_31_60) || 0)
+                    + (Number(a.bucket_61_90) || 0) + (Number(a.bucket_90_plus) || 0);
+                const tb = (Number(b.bucket_1_30) || 0) + (Number(b.bucket_31_60) || 0)
+                    + (Number(b.bucket_61_90) || 0) + (Number(b.bucket_90_plus) || 0);
+                return tb - ta;
+            });
             if (!rows.length) {
                 this.renderReport(this.emptyReport('Overdue Aging'));
                 return;
@@ -1558,7 +1621,7 @@ class ReportsManager {
                             <th>Customer</th>
                             <th>Account</th>
                             <th>Phone</th>
-                            <th>1-30 Days</th>
+                            <th>0-30 Days</th>
                             <th>31-60 Days</th>
                             <th>61-90 Days</th>
                             <th>90+ Days</th>
@@ -1658,7 +1721,24 @@ class ReportsManager {
             const dues = (typeof InstallmentEngine !== 'undefined' && InstallmentEngine.customerDueSummary)
                 ? InstallmentEngine.customerDueSummary(installmentRows, asOf)
                 : { short: 0, current: 0, total: 0 };
-            const bookRemaining = Math.max(0, remaining);
+            const cashSales = await this.safeQuery(`
+                SELECT cs.id, cs.sale_date, cs.agreed_price, cs.received_price, cs.due_amount, p.item_name
+                FROM cash_sales cs
+                LEFT JOIN stock s ON cs.stock_id = s.id
+                LEFT JOIN products p ON s.product_id = p.id
+                WHERE cs.customer_id = ?
+                ORDER BY cs.sale_date
+            `, [customerId], []);
+            const cashCollections = await this.safeQuery(`
+                SELECT collection_date, amount, receipt_no, notes
+                FROM cash_sale_collections
+                WHERE customer_id = ?
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+                ORDER BY collection_date
+            `, [customerId], []);
+            const cashDue = (cashSales || []).reduce((sum, s) => sum + (Number(s.due_amount) || 0), 0);
+            const bookRemaining = Math.max(0, remaining) + cashDue;
+            const statementTotal = (dues.total || 0) + cashDue;
             const paymentRows = (payments || []).filter((p) => (p.type || 'payment') === 'payment');
             let photoHtml = '';
             if (customer.photo_path && window._ipcRenderer) {
@@ -1677,7 +1757,7 @@ class ReportsManager {
                 <p><strong>Book remaining:</strong> ${this.safeFormatCurrency(bookRemaining)} &nbsp;
                    <strong>Short:</strong> ${this.safeFormatCurrency(dues.short)} &nbsp;
                    <strong>Current:</strong> ${this.safeFormatCurrency(dues.current)} &nbsp;
-                   <strong>Total (as of ${asOf}):</strong> ${this.safeFormatCurrency(dues.total)}</p>
+                   <strong>Total (as of ${asOf}):</strong> ${this.safeFormatCurrency(statementTotal)}</p>
                 <div class="section">
                     <h4>Purchases</h4>
                     ${purchases.length ? `
@@ -1716,6 +1796,45 @@ class ReportsManager {
                         </tbody>
                     </table>
                     </div>` : '<p class="text-muted">No payments</p>'}
+                </div>
+                <div class="section">
+                    <h4>Cash Sales</h4>
+                    ${cashSales.length ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Item</th><th>Agreed</th><th>Received</th><th>Due</th></tr></thead>
+                        <tbody>
+                            ${cashSales.map((s) => `
+                                <tr>
+                                    <td>${this.safeFormatDate(s.sale_date)}</td>
+                                    <td>${s.item_name || 'N/A'}</td>
+                                    <td>${this.safeFormatCurrency(s.agreed_price)}</td>
+                                    <td>${this.safeFormatCurrency(s.received_price)}</td>
+                                    <td>${this.safeFormatCurrency(s.due_amount)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>` : '<p class="text-muted">No cash sales</p>'}
+                </div>
+                <div class="section">
+                    <h4>Collections</h4>
+                    ${cashCollections.length ? `
+                    <div class="table-container">
+                    <table class="data-table">
+                        <thead><tr><th>Date</th><th>Amount</th><th>Receipt</th><th>Notes</th></tr></thead>
+                        <tbody>
+                            ${cashCollections.map((c) => `
+                                <tr>
+                                    <td>${this.safeFormatDate(c.collection_date)}</td>
+                                    <td>${this.safeFormatCurrency(c.amount)}</td>
+                                    <td>${c.receipt_no || 'N/A'}</td>
+                                    <td>${c.notes || ''}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    </div>` : '<p class="text-muted">No collections</p>'}
                 </div>
             `;
             this.renderReport(this.wrapPanel('Customer Statement', customer.customer_name, inner, shopName));

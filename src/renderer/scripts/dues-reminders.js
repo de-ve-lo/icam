@@ -366,7 +366,7 @@ class DuesRemindersManager {
             name: row.display_name || row.customer_name || '',
             account: row.account_no || '',
             amount: typeof Utils.formatCurrency === 'function' ? Utils.formatCurrency(amount) : String(amount || ''),
-            due_date: row.due_date || '',
+            due_date: row.due_date || row.sale_date || '',
             shop: settings.shop_name || ''
         });
         return Utils.whatsAppUrl(row.phone, text);

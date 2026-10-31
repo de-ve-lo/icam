@@ -17,6 +17,21 @@ class ExpensesManager {
         if (addTypeBtn) {
             addTypeBtn.addEventListener('click', () => this.openAddExpenseTypeModal());
         }
+
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-btn') && e.target.closest('.expenses-tabs')) {
+                this.switchTab(e.target.dataset.tab);
+            }
+        });
+    }
+
+    switchTab(tabName) {
+        document.querySelectorAll('.expenses-tabs .tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+        document.querySelectorAll('.expenses-tabs .tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `${tabName}-tab`);
+        });
     }
 
     async loadData() {
@@ -54,12 +69,9 @@ class ExpensesManager {
 
         // Calculate summary stats
         const totalExpenses = this.expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+        const thisMonthKey = Utils.toLocalDateString(new Date()).slice(0, 7);
         const thisMonthExpenses = this.expenses
-            .filter(exp => {
-                const expDate = new Date(exp.date);
-                const now = new Date();
-                return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
-            })
+            .filter(exp => String(exp.date || '').slice(0, 7) === thisMonthKey)
             .reduce((sum, exp) => sum + (exp.amount || 0), 0);
 
         const table = `
@@ -113,7 +125,7 @@ class ExpensesManager {
                                         <button class="btn btn-sm btn-primary" onclick="app.expenses.editExpense(${expense.id})">
                                             <i class="fas fa-edit"></i> Edit
                                         </button>
-                                        <button class="btn btn-sm btn-danger" onclick="app.expenses.deleteExpense(${expense.id})">
+                                        <button class="btn btn-sm btn-danger" onclick="app.expenses.confirmDeleteExpense(${expense.id})">
                                             <i class="fas fa-trash"></i> Delete
                                         </button>
                                     </div>
@@ -164,7 +176,7 @@ class ExpensesManager {
                                     <button class="btn btn-sm btn-secondary" onclick="app.expenses.editExpenseType(${type.id})">
                                         <i class="fas fa-edit"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-danger" onclick="app.expenses.deleteExpenseType(${type.id})">
+                                    <button class="btn btn-sm btn-danger" onclick="app.expenses.confirmDeleteExpenseType(${type.id})">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </div>
@@ -189,29 +201,36 @@ class ExpensesManager {
         container.innerHTML = typesList;
     }
 
-    openAddExpenseModal() {
+    openAddExpenseModal(expense) {
         if (this.userExpenseTypes().length === 0) {
             app.showNotification('Please create at least one expense type first', 'warning');
             this.openAddExpenseTypeModal();
             return;
         }
 
+        const isEdit = expense && expense.id;
+        const selectedType = isEdit ? String(expense.expense_type_id) : '';
+        const dateValue = isEdit ? expense.date : Utils.toLocalDateString(new Date());
+        const amountValue = isEdit ? expense.amount : '';
+        const notesValue = isEdit ? Utils.escapeHtml(expense.notes || '') : '';
+
         const modalHtml = `
             <div class="modal">
                 <div class="modal-content modal-lg">
                     <div class="modal-header">
-                        <h3><i class="fas fa-receipt"></i> Add Expense</h3>
+                        <h3><i class="fas fa-receipt"></i> ${isEdit ? 'Edit Expense' : 'Add Expense'}</h3>
                         <button class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
                         <form id="expense-form" class="form-grid">
+                            <input type="hidden" name="id" value="${isEdit ? expense.id : ''}">
                             <div class="form-group">
                                 <label class="form-label required">Expense Type</label>
                                 <div class="input-group">
                                     <select name="expense_type_id" class="form-input" required>
                                         <option value="">Select Expense Type</option>
                                         ${this.userExpenseTypes().map(type => `
-                                            <option value="${type.id}">${type.name}</option>
+                                            <option value="${type.id}" ${String(type.id) === selectedType ? 'selected' : ''}>${type.name}</option>
                                         `).join('')}
                                     </select>
                                     <button type="button" class="btn btn-secondary" onclick="app.expenses.openAddExpenseTypeModal()">
@@ -221,18 +240,18 @@ class ExpensesManager {
                             </div>
                             <div class="form-group">
                                 <label class="form-label required">Date</label>
-                                <input type="date" name="date" class="form-input" required value="${new Date().toISOString().split('T')[0]}">
+                                <input type="date" name="date" class="form-input" required value="${dateValue}">
                             </div>
                             <div class="form-group">
                                 <label class="form-label required">Amount</label>
                                 <div class="input-group">
                                     <span class="input-prefix">Rs.</span>
-                                    <input type="number" name="amount" class="form-input" required min="1" step="0.01">
+                                    <input type="number" name="amount" class="form-input" required min="1" step="0.01" value="${amountValue}">
                                 </div>
                             </div>
                             <div class="form-group form-grid-full">
                                 <label class="form-label">Notes</label>
-                                <textarea name="notes" class="form-input" rows="3" placeholder="Additional details about this expense"></textarea>
+                                <textarea name="notes" class="form-input" rows="3" placeholder="Additional details about this expense">${notesValue}</textarea>
                             </div>
                         </form>
                     </div>
@@ -249,23 +268,27 @@ class ExpensesManager {
         app.showModal(modalHtml);
     }
 
-    openAddExpenseTypeModal() {
+    openAddExpenseTypeModal(expenseType) {
+        const isEdit = expenseType && expenseType.id;
+        const nameValue = isEdit ? Utils.escapeHtml(expenseType.name || '') : '';
+        const descriptionValue = isEdit ? Utils.escapeHtml(expenseType.description || '') : '';
         const modalHtml = `
             <div class="modal">
                 <div class="modal-content modal-sm">
                     <div class="modal-header">
-                        <h3><i class="fas fa-tags"></i> Add Expense Type</h3>
+                        <h3><i class="fas fa-tags"></i> ${isEdit ? 'Edit Expense Type' : 'Add Expense Type'}</h3>
                         <button class="modal-close">&times;</button>
                     </div>
                     <div class="modal-body">
                         <form id="expense-type-form" class="form-grid">
+                            <input type="hidden" name="id" value="${isEdit ? expenseType.id : ''}">
                             <div class="form-group">
                                 <label class="form-label required">Type Name</label>
-                                <input type="text" name="name" class="form-input" required placeholder="e.g., Office Rent, Utilities, Travel">
+                                <input type="text" name="name" class="form-input" required placeholder="e.g., Office Rent, Utilities, Travel" value="${nameValue}">
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Description</label>
-                                <textarea name="description" class="form-input" rows="3" placeholder="Optional description for this expense type"></textarea>
+                                <textarea name="description" class="form-input" rows="3" placeholder="Optional description for this expense type">${descriptionValue}</textarea>
                             </div>
                         </form>
                     </div>
@@ -294,15 +317,22 @@ class ExpensesManager {
             notes: formData.get('notes')
         };
 
+        const id = parseInt(formData.get('id'), 10);
+
         try {
             app.showLoading();
-            await Database.addExpense(expense);
-            app.showNotification('Expense recorded successfully', 'success');
+            if (id) {
+                await Database.updateExpense(id, expense);
+                app.showNotification('Expense updated successfully', 'success');
+            } else {
+                await Database.addExpense(expense);
+                app.showNotification('Expense recorded successfully', 'success');
+            }
             app.closeModal();
-            await this.loadData(); // Refresh the list
+            await this.loadData();
         } catch (error) {
             console.error('Error saving expense:', error);
-            app.showNotification('Failed to record expense', 'error');
+            app.showNotification('Failed to save expense', 'error');
         } finally {
             app.hideLoading();
         }
@@ -323,18 +353,25 @@ class ExpensesManager {
             return;
         }
 
+        const id = parseInt(formData.get('id'), 10);
+
         try {
             app.showLoading();
-            await Database.addExpenseType(expenseType);
-            app.showNotification('Expense type created successfully', 'success');
+            if (id) {
+                await Database.updateExpenseType(id, expenseType);
+                app.showNotification('Expense type updated successfully', 'success');
+            } else {
+                await Database.addExpenseType(expenseType);
+                app.showNotification('Expense type created successfully', 'success');
+            }
             app.closeModal();
-            await this.loadData(); // Refresh the lists
+            await this.loadData();
         } catch (error) {
             console.error('Error saving expense type:', error);
             if (error.message && error.message.includes('UNIQUE constraint failed')) {
                 app.showNotification('An expense type with this name already exists', 'error');
             } else {
-                app.showNotification('Failed to create expense type', 'error');
+                app.showNotification('Failed to save expense type', 'error');
             }
         } finally {
             app.hideLoading();
@@ -344,29 +381,72 @@ class ExpensesManager {
     editExpense(expenseId) {
         const expense = this.expenses.find(e => e.id === expenseId);
         if (!expense) return;
-
-        // Implementation for editing expense would go here
-        app.showNotification('Edit functionality not yet implemented', 'info');
+        this.openAddExpenseModal(expense);
     }
 
     editExpenseType(typeId) {
         const expenseType = this.expenseTypes.find(t => t.id === typeId);
         if (!expenseType) return;
+        this.openAddExpenseTypeModal(expenseType);
+    }
 
-        // Implementation for editing expense type would go here
-        app.showNotification('Edit functionality not yet implemented', 'info');
+    confirmDeleteExpense(expenseId) {
+        const modalHtml = `
+            <div class="modal">
+                <div class="modal-content modal-sm">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-exclamation-triangle text-danger"></i> Confirm Delete</h3>
+                        <button class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <p>Are you sure you want to delete this expense? This action cannot be undone.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                        <button class="btn btn-danger" onclick="app.expenses.deleteExpense(${expenseId}); app.closeModal();">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        app.showModal(modalHtml);
+    }
+
+    confirmDeleteExpenseType(typeId) {
+        const typeExpenses = this.expenses.filter(exp => exp.expense_type_id === typeId);
+        if (typeExpenses.length > 0) {
+            app.showNotification('Cannot delete expense type that has associated expenses', 'error');
+            return;
+        }
+        const modalHtml = `
+            <div class="modal">
+                <div class="modal-content modal-sm">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-exclamation-triangle text-danger"></i> Confirm Delete</h3>
+                        <button class="modal-close">&times;</button>
+                    </div>
+                    <div class="modal-body text-center">
+                        <p>Are you sure you want to delete this expense type? This action cannot be undone.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="app.closeModal()">Cancel</button>
+                        <button class="btn btn-danger" onclick="app.expenses.deleteExpenseType(${typeId}); app.closeModal();">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        app.showModal(modalHtml);
     }
 
     async deleteExpense(expenseId) {
-        if (!confirm('Are you sure you want to delete this expense? This action cannot be undone.')) {
-            return;
-        }
-
         try {
             app.showLoading();
             await Database.deleteExpense(expenseId);
             app.showNotification('Expense deleted successfully', 'success');
-            await this.loadData(); // Refresh the list
+            await this.loadData();
         } catch (error) {
             console.error('Error deleting expense:', error);
             app.showNotification('Failed to delete expense', 'error');
@@ -382,15 +462,11 @@ class ExpensesManager {
             return;
         }
 
-        if (!confirm('Are you sure you want to delete this expense type? This action cannot be undone.')) {
-            return;
-        }
-
         try {
             app.showLoading();
             await Database.deleteExpenseType(typeId);
             app.showNotification('Expense type deleted successfully', 'success');
-            await this.loadData(); // Refresh the lists
+            await this.loadData();
         } catch (error) {
             console.error('Error deleting expense type:', error);
             app.showNotification('Failed to delete expense type', 'error');

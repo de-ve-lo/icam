@@ -152,6 +152,40 @@
       return due <= asOf;
     },
 
+    agingBuckets(rows, asOfDate) {
+      const dueRows = (rows || [])
+        .filter((row) => this.isDueOrPast(row.due_date, asOfDate))
+        .slice()
+        .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')));
+      let remainingPaid = 0;
+      for (const row of dueRows) {
+        remainingPaid += Number(row.paid_amount) || 0;
+      }
+      const buckets = {
+        bucket_1_30: 0,
+        bucket_31_60: 0,
+        bucket_61_90: 0,
+        bucket_90_plus: 0,
+        total: 0
+      };
+      for (const row of dueRows) {
+        const original = Number(row.original_amount) || 0;
+        const applied = Math.min(original, remainingPaid);
+        remainingPaid -= applied;
+        const leftover = original - applied;
+        if (leftover <= 0) continue;
+        const from = parseLocalDate(String(row.due_date).slice(0, 10));
+        const to = parseLocalDate(String(asOfDate).slice(0, 10));
+        const days = Math.round((to - from) / (24 * 60 * 60 * 1000));
+        if (days <= 30) buckets.bucket_1_30 += leftover;
+        else if (days <= 60) buckets.bucket_31_60 += leftover;
+        else if (days <= 90) buckets.bucket_61_90 += leftover;
+        else buckets.bucket_90_plus += leftover;
+        buckets.total += leftover;
+      }
+      return buckets;
+    },
+
     totalShort(rows, asOfDate) {
       let original = 0;
       let paid = 0;

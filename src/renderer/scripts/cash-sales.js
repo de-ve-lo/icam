@@ -18,7 +18,7 @@ class CashSalesManager {
     async loadData() {
         try {
             app.showLoading();
-            this.customers = await Database.getCustomers();
+            this.customers = await Database.getCustomersNeverSold();
             const gmap = await Database.getGuarantorsByCustomerIds(this.customers.map((r) => r.customer_id || r.id));
             this.customers.forEach((r) => {
                 r._guarantors = gmap.get(Number(r.customer_id || r.id)) || [];
@@ -26,6 +26,19 @@ class CashSalesManager {
             });
             this.availableStock = await Database.getAvailableStock();
             this.cashSales = await Database.getCashSales();
+            const saleGmap = await Database.getGuarantorsByCustomerIds(this.cashSales.map((r) => r.customer_id));
+            this.cashSales.forEach((r) => {
+                if (r.customer_id == null) {
+                    r._guarantors = [];
+                    r.display_name = r.customer_name || 'Walk-in Customer';
+                    return;
+                }
+                r._guarantors = saleGmap.get(Number(r.customer_id)) || [];
+                r.display_name = Utils.formatCustomerIdentity(
+                    { customer_name: r.customer_name, account_no: r.account_no },
+                    r._guarantors
+                );
+            });
             this.renderCashSales();
         } catch (error) {
             console.error('Error loading cash sales data:', error);
@@ -86,6 +99,7 @@ class CashSalesManager {
                                 </td>
                                 <td>
                                     <div class="action-buttons">
+                                        ${sale.due_amount > 0 ? this.whatsAppLink(sale) : ''}
                                         <button class="btn btn-sm btn-info" onclick="app.cashSales.printInvoice(${sale.id})">
                                             <i class="fas fa-print"></i> Invoice
                                         </button>
@@ -327,6 +341,22 @@ class CashSalesManager {
         } finally {
             app.hideLoading();
         }
+    }
+
+    whatsAppLink(sale) {
+        if (typeof Utils === 'undefined' || !Utils.whatsAppUrl || !sale || !sale.phone) return '';
+        const settings = (typeof app !== 'undefined' && app._shopSettingsCache) || {};
+        const template = settings.whatsapp_template || 'Assalam-o-Alaikum {name}, account {account}. Due {amount} on {due_date}. {shop}';
+        const text = Utils.fillWhatsAppTemplate(template, {
+            name: sale.display_name || sale.customer_name || '',
+            account: sale.account_no || '',
+            amount: typeof Utils.formatCurrency === 'function' ? Utils.formatCurrency(sale.due_amount) : String(sale.due_amount || ''),
+            due_date: sale.sale_date || '',
+            shop: settings.shop_name || ''
+        });
+        const url = Utils.whatsAppUrl(sale.phone, text);
+        if (!url) return '';
+        return `<a class="btn btn-sm btn-success" href="${url}" target="_blank" rel="noopener"><i class="fas fa-bell"></i> Remind</a>`;
     }
 
     editCashSale(cashSaleId) {
