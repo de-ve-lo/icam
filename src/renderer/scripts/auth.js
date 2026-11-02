@@ -79,6 +79,11 @@ class AuthManager {
         if (userLabel && this.user) {
             userLabel.textContent = this.user.username;
         }
+        const initialEl = document.getElementById('header-user-initial');
+        if (initialEl) {
+            const name = (this.user && this.user.username) || (userLabel && userLabel.textContent) || 'G';
+            initialEl.textContent = String(name).charAt(0).toUpperCase();
+        }
         const shopNameEl = document.getElementById('header-shop-name');
         if (shopNameEl && this.shopName) {
             shopNameEl.textContent = this.shopName;
@@ -232,6 +237,27 @@ class AuthManager {
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => this.logout());
+        }
+        const chip = document.getElementById('user-chip');
+        const toggle = document.getElementById('user-chip-toggle');
+        const menu = document.getElementById('user-chip-menu');
+        if (chip && toggle && menu) {
+            const closeChip = () => {
+                menu.classList.add('hidden');
+                toggle.setAttribute('aria-expanded', 'false');
+            };
+            toggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const open = menu.classList.contains('hidden');
+                menu.classList.toggle('hidden', !open);
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            document.addEventListener('click', (e) => {
+                if (!chip.contains(e.target)) closeChip();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeChip();
+            });
         }
     }
 

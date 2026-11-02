@@ -58,27 +58,31 @@
                     <div id="global-search-results" class="global-search-results hidden"></div>
                 </div>
                     <div class="header-actions">
-                        <button id="refresh-page-btn" class="btn btn-secondary" type="button" title="Refresh current page">
+                        <button id="refresh-page-btn" class="btn btn-secondary header-icon-btn" type="button" title="Refresh current page" aria-label="Refresh current page">
                             <i class="fas fa-sync-alt"></i>
-                            Refresh
+                            <span class="sr-only">Refresh</span>
                         </button>
-                        <button id="calculator-btn" class="btn btn-primary" title="Open Installment Calculator">
+                        <button id="calculator-btn" class="btn btn-primary header-icon-btn" title="Open Installment Calculator" aria-label="Open Installment Calculator">
                             <i class="fas fa-calculator"></i>
-                            Calculator
+                            <span class="sr-only">Calculator</span>
                         </button>
-                        <button id="backup-btn" class="btn btn-secondary" title="Backup Database">
+                        <button id="backup-btn" class="btn btn-secondary header-icon-btn" title="Backup Database" aria-label="Backup Database">
                             <i class="fas fa-download"></i>
-                            Backup
+                            <span class="sr-only">Backup</span>
                         </button>
-                        <button id="system-reset-btn" class="btn btn-danger" data-admin-only title="Reset Entire System">
+                        <button id="system-reset-btn" class="btn btn-danger header-icon-btn" data-admin-only title="Reset Entire System" aria-label="Reset Entire System">
                             <i class="fas fa-trash-restore"></i>
-                            Reset System
+                            <span class="sr-only">Reset System</span>
                         </button>
-                        <div class="user-info">
-                            <i class="fas fa-user"></i>
-                            <span id="header-user-name">Guest</span>
+                        <div class="user-chip" id="user-chip">
+                            <button type="button" class="user-chip-toggle" id="user-chip-toggle" aria-haspopup="true" aria-expanded="false">
+                                <span class="user-chip-initial" id="header-user-initial">G</span>
+                                <span id="header-user-name">Guest</span>
+                            </button>
+                            <div class="user-chip-menu hidden" id="user-chip-menu">
+                                <button id="logout-btn" class="btn btn-secondary" type="button">Logout</button>
+                            </div>
                         </div>
-                        <button id="logout-btn" class="btn btn-secondary" type="button">Logout</button>
                     </div>
             </div>
         </header>
@@ -197,7 +201,7 @@
             <!-- Dashboard Section -->
             <section id="dashboard-section" class="content-section active">
                 <div class="section-header">
-                    <h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2>
+                    <h2>Dashboard</h2>
                     <p>Overview of your installment management system</p>
                     <p class="developer-credit-inline">Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com</p>
                 </div>
@@ -254,7 +258,7 @@
             <!-- Products Section -->
             <section id="products-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-motorcycle"></i> Products Management</h2>
+                    <h2>Products</h2>
                     <button id="add-product-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Add New Product
@@ -282,7 +286,7 @@
             <!-- Suppliers Section -->
             <section id="suppliers-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-truck"></i> Suppliers Management</h2>
+                    <h2>Suppliers</h2>
                     <button id="add-supplier-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Add New Supplier
@@ -307,7 +311,7 @@
             <!-- Stock Section -->
             <section id="stock-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-warehouse"></i> Stock Management</h2>
+                    <h2>Stock</h2>
                     <button id="add-stock-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Add Stock Items
@@ -335,7 +339,7 @@
             <!-- Customers Section -->
             <section id="customers-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-users"></i> Customer Management</h2>
+                    <h2>Customers</h2>
                     <button id="add-customer-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Add New Customer
@@ -363,7 +367,7 @@
             <!-- Installments Section -->
             <section id="installments-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-credit-card"></i> Installment Management</h2>
+                    <h2>Installments</h2>
                     <p class="developer-credit-inline">Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com</p>
                     <div class="search-container">
                         <input type="text" id="customer-search" placeholder="Search by account, CNIC, stock, engine, chassis, IMEI">
@@ -389,7 +393,7 @@
             <!-- Cash Sales Section -->
             <section id="cash-sales-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-shopping-cart"></i> Cash Sales Management</h2>
+                    <h2>Cash Sales</h2>
                     <button id="add-cash-sale-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Record Cash Sale
@@ -402,7 +406,7 @@
             <!-- Supplier Payments Section -->
             <section id="supplier-payments-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-money-bill"></i> Supplier Payments</h2>
+                    <h2>Supplier Payments</h2>
                     <button id="add-supplier-payment-btn" class="btn btn-primary">
                         <i class="fas fa-plus"></i>
                         Record Payment
@@ -416,7 +420,7 @@
             <!-- Expenses Section -->
             <section id="expenses-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-receipt"></i> Expense Management</h2>
+                    <h2>Expenses</h2>
                     <div class="header-actions">
                         <button id="add-expense-type-btn" class="btn btn-secondary">
                             <i class="fas fa-tags"></i>
@@ -445,7 +449,7 @@
 
             <section id="staff-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-id-badge"></i> Staff Salary</h2>
+                    <h2>Staff Salary</h2>
                     <div class="header-actions">
                         <button id="add-staff-btn" class="btn btn-primary" type="button">
                             <i class="fas fa-plus"></i>
@@ -476,7 +480,7 @@
             <!-- Dues & Reminders Section -->
             <section id="dues-reminders-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-bell"></i> Dues & Reminders</h2>
+                    <h2>Dues & Reminders</h2>
                     <div class="header-actions">
                         <button id="send-reminders-btn" class="btn btn-warning">
                             <i class="fas fa-envelope"></i>
@@ -514,7 +518,7 @@
             <!-- Reports Section -->
             <section id="reports-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-chart-bar"></i> Reports</h2>
+                    <h2>Reports</h2>
                     <p class="developer-credit-inline">Developed By POVDEV | povdev.com | WhatsApp: @wpfahad | Email: mypovdev@gmail.com</p>
                 </div>
                 
@@ -645,7 +649,7 @@
 
             <section id="users-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-user-shield"></i> Users</h2>
+                    <h2>Users</h2>
                 </div>
                 <form id="create-user-form" class="form-grid">
                     <div class="form-group">
@@ -684,7 +688,7 @@
 
             <section id="settings-section" class="content-section">
                 <div class="section-header">
-                    <h2><i class="fas fa-cog"></i> Shop Settings</h2>
+                    <h2>Shop Settings</h2>
                 </div>
                 <form id="shop-settings-form" class="form-grid">
                     <div class="form-group">
