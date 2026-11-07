@@ -318,10 +318,10 @@ class DashboardManager {
                                     </div>
                                 </div>
                                 <div class="warning-action">
-                                    <button class="btn btn-sm btn-outline-primary" 
-                                        onclick="app.navigateToSection('installments'); document.getElementById('customer-search').value = '${item.account_no}'; app.installments.searchCustomer('${item.account_no}');">
-                                        View
-                                    </button>
+                                    <button class="btn btn-sm btn-outline-primary"
+                                            onclick="app.navigateToSection('search'); app.search.openInstallmentByAccount('${item.account_no}');">
+                                            View
+                                        </button>
                                 </div>
                             </div>
                         `).join('')}

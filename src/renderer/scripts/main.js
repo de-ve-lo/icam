@@ -211,6 +211,7 @@ class App {
             this.stock = new StockManager();
             this.customers = new CustomerManager();
             this.installments = new InstallmentManager();
+            this.search = new SearchManager();
             
             // Initialize new modules with safety checks
             if (typeof CashSalesManager !== 'undefined') {
@@ -321,6 +322,9 @@ class App {
                     break;
                 case 'installments':
                     await this.installments.loadData();
+                    break;
+                case 'search':
+                    if (this.search && this.search.loadData) await this.search.loadData();
                     break;
                 case 'cash-sales':
                     await this.loadCashSalesSection();

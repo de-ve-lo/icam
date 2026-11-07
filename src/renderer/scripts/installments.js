@@ -9,14 +9,6 @@ class InstallmentManager {
     }
 
     setupEventListeners() {
-        const searchBtn = document.getElementById('search-customer-btn');
-        const searchInput = document.getElementById('customer-search');
-        if (searchBtn && searchInput) {
-            searchBtn.addEventListener('click', () => this.searchCustomer(searchInput.value));
-            searchInput.addEventListener('keyup', (e) => {
-                if (e.key === 'Enter') this.searchCustomer(searchInput.value);
-            });
-        }
     }
 
     async loadData() {

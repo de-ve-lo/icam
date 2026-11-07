@@ -7,6 +7,25 @@
 }
 #modal-container:empty { display: none; }
 
+#search-detail-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147482000;
+}
+#search-detail-overlay.hidden {
+    display: none;
+}
+#search-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+}
+#search-toolbar .form-group {
+    margin-bottom: 0;
+}
+
 .modal {
     position: fixed;
     inset: 0;

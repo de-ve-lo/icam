@@ -209,6 +209,154 @@ class Database {
         return { customers: customers || [], stock: stock || [] };
     }
 
+    static async searchByDateRange(fromDate, toDate, filterTerm) {
+        const from = String(fromDate || '').trim();
+        const to = String(toDate || '').trim();
+        const like = filterTerm ? `%${String(filterTerm).trim()}%` : null;
+        const cashDate = [];
+        const purchDate = [];
+        if (from) { cashDate.push('cs.sale_date >= ?'); purchDate.push('cp.start_date >= ?'); }
+        if (to) { cashDate.push('cs.sale_date <= ?'); purchDate.push('cp.start_date <= ?'); }
+        const cashParams = [];
+        const purchParams = [];
+        if (from) { cashParams.push(from); purchParams.push(from); }
+        if (to) { cashParams.push(to); purchParams.push(to); }
+        const identSql = (aliasC, aliasS, aliasG) => like ? `
+            AND (
+                ${aliasC}.customer_name LIKE ? OR ${aliasC}.account_no LIKE ? OR ${aliasC}.cnic_no LIKE ? OR ${aliasC}.phone LIKE ?
+                OR ${aliasS}.engine_no LIKE ? OR ${aliasS}.chassis_no LIKE ? OR ${aliasS}.stock_no LIKE ? OR ${aliasS}.imei LIKE ?
+                OR ${aliasS}.serial_no LIKE ? OR ${aliasS}.reg_no LIKE ?
+                OR ${aliasG}.name LIKE ? OR ${aliasG}.phone LIKE ? OR ${aliasG}.cnic_no LIKE ?
+            )` : '';
+        const identParams = like
+            ? [like, like, like, like, like, like, like, like, like, like, like, like, like]
+            : [];
+        const cash = await this.query(`
+            SELECT 'cash' as result_type, cs.sale_date as date, cs.id as cash_sale_id, cs.customer_id,
+                   NULL as stock_id_join, cs.stock_id, NULL as purchase_id, c.account_no, c.customer_name,
+                   p.item_name, cs.agreed_price as amount, cs.payment_status as status,
+                   s.engine_no, s.chassis_no, s.imei, s.serial_no, s.stock_no, s.reg_no, s.is_sold
+            FROM cash_sales cs
+            LEFT JOIN customers c ON c.id = cs.customer_id
+            JOIN stock s ON s.id = cs.stock_id
+            JOIN products p ON p.id = s.product_id
+            LEFT JOIN guarantors g ON g.customer_id = c.id
+            WHERE ${cashDate.length ? cashDate.join(' AND ') : '1=1'}
+            ${identSql('c', 's', 'g')}
+            GROUP BY cs.id
+            ORDER BY cs.sale_date DESC
+        `, cashParams.concat(identParams));
+        const purchases = await this.query(`
+            SELECT 'installment' as result_type, cp.start_date as date, NULL as cash_sale_id, cp.customer_id,
+                   cp.stock_id, cp.id as purchase_id, c.account_no, c.customer_name,
+                   p.item_name, cp.sale_price as amount, cp.status as status,
+                   s.engine_no, s.chassis_no, s.imei, s.serial_no, s.stock_no, s.reg_no, s.is_sold
+            FROM customer_purchases cp
+            JOIN customers c ON c.id = cp.customer_id
+            JOIN stock s ON s.id = cp.stock_id
+            JOIN products p ON p.id = s.product_id
+            LEFT JOIN guarantors g ON g.customer_id = c.id
+            WHERE (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+              AND ${purchDate.length ? purchDate.join(' AND ') : '1=1'}
+            ${identSql('c', 's', 'g')}
+            GROUP BY cp.id
+            ORDER BY cp.start_date DESC
+        `, purchParams.concat(identParams));
+        return [].concat(purchases || [], cash || []);
+    }
+
+    static async getCashSaleByInvoiceNo(csNumber) {
+        const m = String(csNumber || '').trim().match(/^CS-(\d{6})$/i);
+        if (!m) return null;
+        const id = Number(m[1]);
+        return await this.getCashSaleById(id);
+    }
+
+    static async getCashSaleById(id) {
+        return await this.get(`
+            SELECT cs.*, c.customer_name, c.account_no, c.phone, p.item_name, p.category,
+                   s.engine_no, s.chassis_no, s.imei, s.serial_no, s.quantity, s.stock_no, s.reg_no
+            FROM cash_sales cs
+            LEFT JOIN customers c ON cs.customer_id = c.id
+            JOIN stock s ON cs.stock_id = s.id
+            JOIN products p ON s.product_id = p.id
+            WHERE cs.id = ?
+        `, [Number(id)]);
+    }
+
+    static async getAccountByReceiptNo(receiptNo) {
+        const row = await this.get(`
+            SELECT p.customer_id, p.receipt_no, p.purchase_id
+            FROM payments p
+            WHERE p.receipt_no = ? AND (p.is_deleted = 0 OR p.is_deleted IS NULL)
+            LIMIT 1
+        `, [String(receiptNo || '').trim()]);
+        if (!row || !row.customer_id) return null;
+        return await this.get('SELECT * FROM customers WHERE id = ?', [row.customer_id]);
+    }
+
+    static async getCashSaleByCollectionReceipt(receiptNo) {
+        const row = await this.get(`
+            SELECT csc.cash_sale_id
+            FROM cash_sale_collections csc
+            WHERE csc.receipt_no = ? AND (csc.is_deleted = 0 OR csc.is_deleted IS NULL)
+            LIMIT 1
+        `, [String(receiptNo || '').trim()]);
+        if (!row) return null;
+        return await this.getCashSaleById(row.cash_sale_id);
+    }
+
+    static async getCustomerByAccountNoExact(accountNo) {
+        return await this.get('SELECT * FROM customers WHERE account_no = ?', [String(accountNo || '').trim()]);
+    }
+
+    static async searchIdentifiers(term) {
+        const like = `%${String(term || '').trim()}%`;
+        const params = [like, like, like, like, like, like, like, like, like, like, like, like, like];
+        const purchases = await this.query(`
+            SELECT DISTINCT 'installment' as result_type, cp.start_date as date, cp.customer_id, cp.stock_id,
+                   cp.id as purchase_id, NULL as cash_sale_id, c.account_no, c.customer_name, p.item_name,
+                   cp.sale_price as amount, cp.status as status, s.engine_no, s.chassis_no, s.imei,
+                   s.serial_no, s.stock_no, s.reg_no, s.is_sold
+            FROM customers c
+            JOIN customer_purchases cp ON cp.customer_id = c.id AND (cp.is_deleted = 0 OR cp.is_deleted IS NULL)
+            JOIN stock s ON s.id = cp.stock_id
+            JOIN products p ON p.id = s.product_id
+            LEFT JOIN guarantors g ON g.customer_id = c.id
+            WHERE c.account_no LIKE ? OR c.customer_name LIKE ? OR c.cnic_no LIKE ? OR c.phone LIKE ?
+               OR s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.stock_no LIKE ? OR s.imei LIKE ?
+               OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR g.name LIKE ? OR g.phone LIKE ? OR g.cnic_no LIKE ?
+        `, params);
+        const cash = await this.query(`
+            SELECT DISTINCT 'cash' as result_type, cs.sale_date as date, cs.customer_id, cs.stock_id,
+                   NULL as purchase_id, cs.id as cash_sale_id, c.account_no, c.customer_name, p.item_name,
+                   cs.agreed_price as amount, cs.payment_status as status, s.engine_no, s.chassis_no, s.imei,
+                   s.serial_no, s.stock_no, s.reg_no, s.is_sold
+            FROM cash_sales cs
+            LEFT JOIN customers c ON c.id = cs.customer_id
+            JOIN stock s ON s.id = cs.stock_id
+            JOIN products p ON p.id = s.product_id
+            LEFT JOIN guarantors g ON g.customer_id = c.id
+            WHERE c.account_no LIKE ? OR c.customer_name LIKE ? OR c.cnic_no LIKE ? OR c.phone LIKE ?
+               OR s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.stock_no LIKE ? OR s.imei LIKE ?
+               OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR g.name LIKE ? OR g.phone LIKE ? OR g.cnic_no LIKE ?
+                OR p.item_name LIKE ?
+        `, params.concat([like]));
+        const stock = await this.query(`
+            SELECT DISTINCT 'stock' as result_type, s.stock_date as date, NULL as customer_id, s.id as stock_id,
+                   NULL as purchase_id, NULL as cash_sale_id, NULL as account_no, NULL as customer_name, p.item_name,
+                   s.purchase_price as amount, CASE WHEN s.is_sold = 1 THEN 'Sold' ELSE 'Available' END as status,
+                   s.engine_no, s.chassis_no, s.imei, s.serial_no, s.stock_no, s.reg_no, s.is_sold
+            FROM stock s
+            JOIN products p ON p.id = s.product_id
+            WHERE s.is_sold = 0 AND (
+                s.engine_no LIKE ? OR s.chassis_no LIKE ? OR s.stock_no LIKE ? OR s.imei LIKE ?
+                OR s.serial_no LIKE ? OR s.reg_no LIKE ? OR p.item_name LIKE ?
+            )
+        `, [like, like, like, like, like, like, like]);
+        return [].concat(purchases || [], cash || [], stock || []);
+    }
+
     static async searchCustomersExtended(searchTerm) {
         const like = `%${searchTerm}%`;
         return await this.query(`
