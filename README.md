@@ -1,36 +1,66 @@
 # Installment Management System
 
-A comprehensive desktop application for managing motorcycle/bike installment sales, built with Electron.js and SQLite.
+Desktop app for shop installment and cash sales, built with Electron and SQLite.
 
 Developed By **POVDEV** — [povdev.com](https://povdev.com) | WhatsApp: @wpfahad | Email: mypovdev@gmail.com
 
+Version **1.0.0**. Currency is **Rs.**
+
 ## Features
 
-### Core Functionality
-- **Product Management**: Add, edit, and manage bike/motorcycle models with pricing information
-- **Supplier Management**: Maintain supplier database for inventory tracking  
-- **Stock Management**: Track inventory with engine numbers, chassis numbers, and stock details
-- **Customer Management**: Complete customer profiles with guarantor support
-- **Installment Calculator**: Advanced calculator with automatic profit and installment calculations
-- **Payment Processing**: Handle installment payments with receipt generation
-- **Reporting**: Generate various business reports and analytics
-- **Data Backup**: Automated database backup and restore functionality
+### Operations
+- **Search**: Dedicated page for installment, cash, and stock. Query plus From/To dates. Looks up account, invoice (`CS-000001`, `CS-YYYYMMDD-...`), receipt (`REC-...`), engine, chassis, IMEI, serial, stock no, reg no, CNIC, phone, name, and guarantor. Unique documents open overlay detail; identifier hits stay a list. Overlay reuses existing pay, print, collect, and edit. Header search stays. Dashboard overdue View opens Search overlay.
+- **Products**: Add, edit, and manage models with current and purchase price, plus categories.
+- **Suppliers**: Supplier records for purchases and balances.
+- **Stock**: Engine, chassis, IMEI, serial, stock no, and registration. Snapshot price on sale. Ledger amount uses product price unless an override snapshot is set.
+- **Customers**: Profiles with CNIC photos, phone, address, and multiple guarantors. Identity prints as `{name} C/O {g1} C/O {g2}` (spaces on both sides of each `C/O`). Calculator and cash-sale add list customers who have never been sold.
+- **Installments**: Schedule, Pay Now, void, Print Ledger, receipts. Partial pay stays on the same row. Leftover rolls to the next installment only after the due month passes (`isMonthPassed`). Short = unpaid where `due_date <= as-of`. Current = unpaid same month where `due_date > as-of`. Grand remaining is unchanged by roll.
+- **Cash Sales**: Record cash sales, later collections by collection date, WhatsApp Remind when due amount is greater than zero. Invoices `CS-000001`.
+- **Supplier Payments**: Record payments and see balances.
+- **Expenses**: Types plus expenses, edit and in-app delete, local calendar month.
+- **Staff Salary**: Cycle from join-date anniversary. Remaining subtracts advances and salary already paid this cycle. After a full salary payment, Advance applies to the next cycle.
+- **Dues & Reminders**: Installment dues, cash-sale dues, overdue. WhatsApp reminders with a shop template.
+- **Reports**: Date range plus as-of (End date) vs period (Start–End). Print preview with Print and Save PDF.
 
-### Key Capabilities
-- Support for 1-50 month installment periods
-- Automatic profit percentage calculations
-- Overdue payment tracking
-- Multiple guarantor support per customer
-- Receipt/slip printing for payments
-- Customer search by account number, CNIC, or phone
-- Real-time dashboard with business statistics
-- Modern, responsive user interface
+### Reports
+- Monthly Collection
+- Customer-wise Collection
+- Customer Outstanding (Short, Current, total)
+- Installment Receivable and Received
+- Cash Sales
+- Supplier Payments
+- Expense
+- Stock
+- Daily Cash Book
+- Overdue Aging (0-30 / 31-60 / 90+; nets Pay Now leftover)
+- Customer Statement (installments plus cash sales and collections)
+- Profit Snapshot
+- Upcoming Dues
+- Defaulter List
+- Supplier Ledger
+- Purchase-wise Remaining
+- Universal Report (sales, expenses, staff)
+
+### Admin and chrome
+- Admin / employee login. Default `admin` / `admin`; password must change on first sign-in.
+- Idle lock (minutes in Shop Settings).
+- Users (admin): create admin or employee accounts.
+- Shop Settings: name, phone, address, logo, idle lock, WhatsApp template (`{name} {account} {amount} {due_date} {shop}`).
+- Backup to file, restore (admin), Google Drive for Desktop folder backup/restore.
+- Header: global search, refresh, calculator, backup, system reset (admin), user chip.
+- TailAdmin light UI, Font Awesome, Segoe UI.
 
 ## Shop PC install
 
-Install from `dist/*.exe` (NSIS installer). Default login is `admin` / `admin`; you must change the password on first sign-in.
+Install from the GitHub release NSIS installer:
 
-The live database lives in the Electron `userData` folder (not next to the installer). Use Backup in the header to copy it.
+https://github.com/de-ve-lo/icam/releases/tag/v1.0.0
+
+Default login is `admin` / `admin`; you must change the password on first sign-in.
+
+The live database lives in the Electron `userData` folder (not next to the installer). Use Backup in the header to copy it. Uninstall does not wipe the database.
+
+The installer is unsigned; Windows SmartScreen may warn.
 
 ## Developer setup
 
@@ -43,188 +73,107 @@ npm run dev
 
 Shop PCs should run the installed app, not `start.bat`. Developers use `npm install` once and `npm run dev`.
 
-### Windows installer (build on Windows / CI)
+```bash
+npm test
+```
+
+### Windows installer
 
 ```bash
 npm run build-win
 ```
 
-The installer is written to `dist/`. This Linux workspace may not produce an `.exe`.
+The installer is written to `dist/` (gitignored). Release assets are uploaded to GitHub, not committed.
 
 ## Project Structure
 
 ```
 installment-management-app/
 ├── src/
-│   ├── main.js                 # Main Electron process
+│   ├── main.js
+│   ├── preload.js
 │   ├── database/
-│   │   └── database.js         # Database manager
+│   │   └── database.js
 │   └── renderer/
-│       ├── index.html          # Main UI
+│       ├── index.html
 │       ├── styles/
-│       │   ├── main.css        # Core styles
-│       │   ├── components.css  # Component styles
-│       │   └── animations.css  # Animation styles
+│       │   ├── main.css
+│       │   ├── components.css
+│       │   └── animations.css
 │       └── scripts/
-│           ├── main.js         # Application controller
-│           ├── database.js     # Database interface
-│           ├── dashboard.js    # Dashboard management
-│           └── components.js   # UI components
-├── database/
-│   ├── installments.db        # Main database (auto-created)
-│   └── backups/               # Database backups
+│           ├── main.js
+│           ├── database.js
+│           ├── search.js
+│           ├── dashboard.js
+│           ├── installments.js
+│           ├── installment-engine.js
+│           ├── cash-sales.js
+│           ├── calculator.js
+│           ├── customers.js
+│           ├── stock.js
+│           ├── products.js
+│           ├── suppliers.js
+│           ├── supplier-payments.js
+│           ├── expenses.js
+│           ├── staff.js
+│           ├── staff-salary-lib.js
+│           ├── dues-reminders.js
+│           ├── reports.js
+│           ├── auth.js
+│           ├── utils.js
+│           └── stock-ledger.js
 ├── assets/
-│   └── icon.png               # Application icon
-├── package.json               # Dependencies and scripts
-└── README.md                  # This file
+│   └── icon.ico
+├── package.json
+└── README.md
 ```
 
-## Database Structure
+## Database
 
-The application uses SQLite with the following main tables:
+SQLite. Packaged app uses Electron `userData`. Dev mode uses `database/`.
 
-- **products**: Store bike/motorcycle models and pricing
-- **suppliers**: Supplier information
-- **stock**: Inventory with engine/chassis numbers  
-- **customers**: Customer profiles
-- **guarantors**: Customer guarantor information
-- **customer_purchases**: Purchase transactions
-- **installments**: Payment schedule
-- **payments**: Payment history
+Main tables include products, suppliers, stock, customers, guarantors, customer_purchases, installments, payments, cash_sales, cash_sale_collections, expenses, staff, and users.
 
-## Usage Guide
+## Usage
 
-### 1. Initial Setup
-1. Launch the application
-2. The database will be automatically created on first run
-3. Start by adding suppliers and products
+1. Sign in. Change the default admin password when prompted.
+2. Set shop name, phone, address, and logo under Settings.
+3. Add suppliers and products, then stock (engine/chassis/IMEI as needed).
+4. Add customers and guarantors (CNIC photos optional).
+5. Open Calculator to create an installment, or Cash Sales to record a cash sale. Both list never-sold customers.
+6. Use Search for account, invoice, receipt, engine, chassis, CNIC, name, or a date range. Pay, print, and collect from the overlay.
+7. Process payments on Installments (Pay Now, void, Print Ledger). Short uses `due_date <= as-of`; leftover roll waits until the next month.
+8. Dues & Reminders and Reports for collections, aging, statements, and WhatsApp Remind.
+9. Backup from the header or Settings. Optional Google Drive for Desktop folder.
 
-### 2. Adding Products
-- Navigate to "Products" section
-- Click "Add New Product" 
-- Enter item name, current price, and purchase price
-- Save to add to inventory
+## Backup
 
-### 3. Managing Stock  
-- Go to "Stock Management"
-- Add stock items with product selection, supplier, engine/chassis numbers
-- Track availability status
-
-### 4. Customer Registration
-- Access "Customer Management"
-- Add customer details including CNIC, phone, address
-- Add multiple guarantors per customer
-- Select supplier and stock for installment purchase
-
-### 5. Creating Installments
-- Use the installment calculator popup
-- Set sale price, advance payment, profit margin
-- Choose installment period (1-50 months)
-- System automatically calculates monthly amounts
-- Generate installment schedule
-
-### 6. Processing Payments
-- Navigate to "Installments" 
-- Search customer by account number or CNIC
-- View installment schedule
-- Process payments and generate receipts
-- Track overdue payments
-
-### 7. Reports and Analytics
-- Dashboard shows key business metrics
-- Generate various reports for analysis
-- Monitor collection performance
-
-## Database Backup
-
-### Automatic Backup
-- Click "Backup" button in header
-- Packaged app backups are written next to the `userData` database (`backups/`)
-- Dev mode still uses `database/backups/`
-- Files named with timestamp for easy identification
+- Header Backup and Settings Backup to file write next to the `userData` database (`backups/`). Dev mode uses `database/backups/`.
+- Restore is admin only and replaces current data.
+- Google Drive: install Drive for Desktop, choose the Drive folder, then Backup to Drive.
 
 ## Troubleshooting
 
-### Common Issues
-
 **Application won't start:**
-- Ensure Node.js is properly installed
-- Run `npm install` to install dependencies
-- Check for error messages in console
+- Ensure Node.js is installed
+- Run `npm install`
+- Check the console for errors
 
 **Database errors:**
 - Check write permissions for Electron `userData` (or `database/` in `npm run dev`)
-- Verify better-sqlite3 is installed: `npm list better-sqlite3`
+- Verify better-sqlite3: `npm list better-sqlite3`
 
 **Build failures:**
-- Clear node_modules: `rm -rf node_modules && npm install`
-- Update electron-builder: `npm update electron-builder`
+- Reinstall dependencies, then `npm run build-win`
 
 **UI not loading:**
-- Check browser console for JavaScript errors
-- Verify all CSS and JS files are present
-
-### Performance Tips
-- Regular database backups (weekly recommended)
-- Archive old payment records annually
-- Monitor database size growth
-- Use SSD storage for better performance
-
-## Development
-
-### Development Mode Features
-- Hot reload for HTML/CSS changes
-- Developer tools available (F12)
-- Console logging for debugging
-
-### Extending Functionality
-The modular architecture allows easy extension:
-
-- Add new report types in reports section
-- Extend customer fields as needed
-- Add new payment methods
-- Integrate with external systems
-
-### Code Structure
-- `src/main.js`: Electron main process
-- `src/renderer/scripts/main.js`: Application controller
-- Individual managers for each feature
-- Database abstraction layer
-- Component-based UI architecture
-
-## Security Considerations
-
-- Database stored locally (not cloud-connected)
-- Customer data encrypted at rest
-- Backup files should be stored securely
-- Regular security updates recommended
-
-## Support and Maintenance
-
-For technical support:
-1. Check this documentation first
-2. Review console error messages
-3. Verify system requirements
-4. Check database integrity
-
-Regular maintenance:
-- Weekly database backups
-- Monthly software updates
-- Annual data archiving
-- Performance monitoring
+- Check the renderer console (F12 in dev)
+- Confirm CSS and script files under `src/renderer/`
 
 ## Version History
 
-- **v1.0.0**: Initial release with core functionality
-- Complete installment management system
-- Modern responsive UI
-- Database backup/restore
-- Receipt generation
-
----
-
-**Note**: This application is designed for local business use. Ensure proper data backup procedures and maintain system security.
+- **v1.0.0**: Shop installment and cash-sale desktop app. Dedicated Search page, TailAdmin light chrome, due-date Short vs year-month leftover roll, C/O identity, cash collections on collection date, expenses edit, cash-sale Remind, aging buckets, customer statement cash sales, staff join-date salary cycle, Drive backup, WhatsApp reminders, Print Ledger, NSIS installer.
 
 ## License
 
-This project is licensed under the MIT License.
+MIT
